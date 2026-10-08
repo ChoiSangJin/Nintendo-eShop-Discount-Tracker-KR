@@ -16,3 +16,5 @@ android/app/*.keystore
 .env
 dist/
 *.log
+__pycache__/
+*.pyc
