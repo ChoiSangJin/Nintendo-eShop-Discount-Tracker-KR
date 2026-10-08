@@ -20,6 +20,13 @@ jobs:
           RELEASE_COMMIT: c2c78df2229a1582c78b15fe2fd715ba618d9cd3
         run: |
           set -euo pipefail
+          report_error() {
+            while IFS= read -r line; do
+              printf '::error::%s\n' "$line"
+            done < /tmp/publish-stderr.log
+          }
+          trap report_error ERR
+          exec 2> /tmp/publish-stderr.log
           tag_sha=$(gh api repos/${{ github.repository }}/git/ref/tags/v1.0.0 --jq '.object.sha' 2>/dev/null || true)
           if [[ -n "$tag_sha" && "$tag_sha" != "$RELEASE_COMMIT" ]]; then
             gh api --method PATCH repos/${{ github.repository }}/git/refs/tags/v1.0.0 -f sha="$RELEASE_COMMIT" -F force=false
