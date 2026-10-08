@@ -18,6 +18,16 @@ void main() {
           receiveTimeout: const Duration(seconds: 30),
         ),
       );
+      dio.interceptors.add(
+        InterceptorsWrapper(
+          onError: (error, handler) {
+            stdout.writeln(
+              'Official API failed: ${error.requestOptions.uri} (HTTP ${error.response?.statusCode})',
+            );
+            handler.next(error);
+          },
+        ),
+      );
       // The VM's default HTTP client does not honor HTTPS_PROXY automatically.
       // Route through the platform proxy; preserve the default trusted TLS setup.
       final certificate = Platform.environment['CODEX_PROXY_CERT'];
