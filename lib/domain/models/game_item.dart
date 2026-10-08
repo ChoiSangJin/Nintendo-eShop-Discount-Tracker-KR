@@ -1,6 +1,22 @@
 import 'package:html/parser.dart' as html;
 import 'genre_catalog.dart';
 
+bool isStoreId(String id) => RegExp(r'^\d{14}$').hasMatch(id);
+
+String? catalogSourceUrl(dynamic value) {
+  if (value is! String) return null;
+  final text = value.trim();
+  if (!text.startsWith('https://') && !text.startsWith('/kr/')) return null;
+  final parsed = Uri.tryParse(text);
+  if (parsed == null) return null;
+  final uri = Uri.parse('https://www.nintendo.com').resolveUri(parsed);
+  return uri.scheme == 'https' &&
+          RegExp(r'^[a-z0-9.-]+$').hasMatch(uri.host) &&
+          uri.userInfo.isEmpty
+      ? uri.toString()
+      : null;
+}
+
 int? parsePrice(dynamic value) {
   if (value is num) return value.isFinite && value >= 0 ? value.round() : null;
   if (value is! String) return null;
@@ -31,6 +47,7 @@ class GameItem {
     this.priceCheckedAt,
     this.hardware = 'Nintendo Switch',
     this.popularityRank,
+    this.sourceUrl,
   });
 
   final String id;
@@ -46,6 +63,10 @@ class GameItem {
   final DateTime? priceCheckedAt;
   final String hardware;
   final int? popularityRank;
+  final String? sourceUrl;
+  String? get storeUrl =>
+      isStoreId(id) ? 'https://store.nintendo.co.kr/$id' : null;
+  String? get detailsUrl => storeUrl ?? catalogSourceUrl(sourceUrl);
 
   GamePlatform get platform => switch (hardware.trim().toLowerCase()) {
     'nintendo switch' => GamePlatform.switch1,
@@ -99,6 +120,7 @@ class GameItem {
     priceCheckedAt: priceCheckedAt,
     hardware: hardware,
     popularityRank: popularityRank,
+    sourceUrl: sourceUrl,
   );
 
   GameItem withPopularityRank(int? rank) =>
@@ -127,6 +149,7 @@ class GameItem {
       priceCheckedAt: json == null ? null : checkedAt,
       hardware: hardware,
       popularityRank: popularityRank,
+      sourceUrl: sourceUrl,
     );
   }
 
@@ -152,6 +175,7 @@ class GameItem {
           : const [],
       releaseDate: parseDate(json['release_date_on_eshop']),
       hardware: json['hardware']?.toString() ?? 'Nintendo Switch',
+      sourceUrl: catalogSourceUrl(json['sourceUrl']),
     );
   }
 
@@ -171,6 +195,7 @@ class GameItem {
       'genres': json['genres'] ?? json['genre'] ?? knownGenres(title),
       'release_date_on_eshop':
           json['releaseDateDownload'] ?? json['releaseDate'],
+      'sourceUrl': json['pageLinkCustom'],
     });
     return metadata;
   }
@@ -189,6 +214,7 @@ class GameItem {
     'priceCheckedAt': priceCheckedAt?.toIso8601String(),
     'hardware': hardware,
     'popularityRank': popularityRank,
+    'sourceUrl': sourceUrl,
   };
 
   factory GameItem.fromJson(Map<String, dynamic> json) => GameItem(
@@ -205,5 +231,6 @@ class GameItem {
     priceCheckedAt: parseDate(json['priceCheckedAt']),
     hardware: json['hardware']?.toString() ?? 'Nintendo Switch',
     popularityRank: (json['popularityRank'] as num?)?.toInt(),
+    sourceUrl: catalogSourceUrl(json['sourceUrl']),
   );
 }

@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:switch_sale_tracker/data/datasources/korean_title_resolver.dart';
 import 'package:switch_sale_tracker/data/datasources/local_store.dart';
 import 'package:switch_sale_tracker/data/repositories/game_repository.dart';
+import 'package:switch_sale_tracker/domain/models/game_item.dart';
 import 'package:switch_sale_tracker/presentation/controllers/game_list_controller.dart';
 
 // Read-only live probe. Never use fixture or sample game data in this check.
@@ -62,12 +63,36 @@ void main() {
         final pokemon = filterAndSortGames(
           games,
           genre: '전체',
-          query: '포켓몬',
+          query: '포켓몬스터',
           sort: GameSort.discount,
           now: now,
         );
         expect(
           pokemon.any((g) => g.regularPrice != null && !g.saleActiveAt(now)),
+          isTrue,
+        );
+        final verifiedIds = {
+          '70010000053968',
+          '70010000053973',
+          '70010000039952',
+          '70010000039957',
+          '70010000026251',
+          '70010000026252',
+          '70010000015693',
+          '70010000015694',
+        };
+        expect(pokemon.map((g) => g.id), containsAll(verifiedIds));
+        for (final game in pokemon.where((g) => verifiedIds.contains(g.id))) {
+          expect(game.regularPrice, isNotNull);
+          expect(game.storeUrl, isNotNull);
+          stdout.writeln('${game.name}: ${game.priceAt(now)} KRW (${game.id})');
+        }
+        final metadataOnly = games.where((g) => !isStoreId(g.id)).toList();
+        expect(metadataOnly, isNotEmpty);
+        expect(
+          metadataOnly.every(
+            (g) => g.priceAt(now) == null && g.storeUrl == null,
+          ),
           isTrue,
         );
         for (final sort in [
@@ -108,7 +133,7 @@ void main() {
         final ranks = await repository.fetchPopularity();
         expect(games.any((g) => ranks.rankFor(g) != null), isTrue);
         stdout.writeln(
-          'Live complete KR catalog: ${games.length} valid unique NSUIDs, ${sales.length} active discounts, ${persona.length} Persona matches, ${pokemon.length} Pokémon matches. Global discount/price/release order verified across every 20-item page.',
+          'Live complete KR catalog: ${games.length} unique products, ${metadataOnly.length} metadata-only records, ${sales.length} active discounts, ${persona.length} Persona matches, ${pokemon.length} Pokémon matches. Global discount/price/release order verified across every 20-item page.',
         );
         for (final g in persona) {
           stdout.writeln('${g.name}: ${g.priceAt(now)} KRW');

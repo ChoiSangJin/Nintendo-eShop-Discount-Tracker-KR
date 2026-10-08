@@ -382,9 +382,12 @@ int compareDiscount(GameItem a, GameItem b, DateTime now) {
 String normalizeSearch(String value) {
   var text = value.toLowerCase().replaceAll('é', 'e');
   const aliases = {
+    '포켓몬스터': '포켓몬',
     'persona': '페르소나',
     'pokemon': '포켓몬',
     'pokémon': '포켓몬',
+    'scarlet': '스칼렛',
+    'violet': '바이올렛',
     'mario': '마리오',
     'zelda': '젤다',
     'animal crossing': '동물의숲',

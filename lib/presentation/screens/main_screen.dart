@@ -178,7 +178,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                       onPressed: () => showAboutDialog(
                         context: context,
                         applicationName: 'Switch 할인 트래커 KR',
-                        applicationVersion: '1.3.1',
+                        applicationVersion: '1.3.2',
                         applicationIcon: const Icon(
                           Icons.sports_esports_rounded,
                           color: Color(0xffe60012),

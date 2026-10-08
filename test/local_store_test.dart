@@ -24,6 +24,15 @@ void main() {
         });
         expect(store.catalogComplete, isFalse);
         expect(store.readGames(), hasLength(1));
+        await store.cache.put('catalog_snapshot_v2', {
+          'games': [game.toJson()],
+          'updated_at': DateTime.utc(2026, 10, 8).toIso8601String(),
+          'catalog_at': DateTime.utc(2026, 10, 8).toIso8601String(),
+        });
+        // The previous "complete" snapshot omitted placeholder/paired products.
+        expect(store.catalogComplete, isFalse);
+        expect(store.catalogFetchedAt, isNull);
+        expect(store.readGames(), hasLength(1));
         await store.saveFavorite(game);
         await store.saveGames([game], DateTime.utc(2026, 10, 8));
         await store.saveKoreanTitle(game.id, '공식 한국어 제목');
@@ -37,7 +46,7 @@ void main() {
         expect(restored.readKoreanTitle(game.id), '공식 한국어 제목');
         await restored.removeFavorite(game.id);
         expect(restored.readFavorites(), isEmpty);
-        await restored.cache.put('catalog_snapshot_v2', {
+        await restored.cache.put('catalog_snapshot_v3', {
           'games': [
             game.toJson(),
             {'id': 42},
