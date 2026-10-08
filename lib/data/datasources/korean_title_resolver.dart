@@ -33,6 +33,12 @@ class KoreanTitleResolver {
         : null;
   }
 
+  String cachedName(String id, String fallback) {
+    if (hasHangul(fallback)) return fallback;
+    final saved = store.readKoreanTitle(id);
+    return saved != null && hasHangul(saved) ? saved : fallback;
+  }
+
   Future<String> resolve(String id, String fallback) async {
     if (hasHangul(fallback)) return fallback;
     final saved = store.readKoreanTitle(id);
