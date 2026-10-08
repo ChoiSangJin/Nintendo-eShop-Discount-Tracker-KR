@@ -35,20 +35,26 @@ class _MainScreenState extends ConsumerState<MainScreen>
     if (_tab == 0) ref.read(gameListProvider.notifier).setQuery(value);
   }
 
-  List<GameItem> _filtered(GameListState state) {
+  bool _showInDiscountDiscovery(GameItem game, DateTime now) {
+    final price = game.priceAt(now);
+    return game.saleActiveAt(now) &&
+        price != null &&
+        (price < 1000 || price >= 5000);
+  }
+
+  List<GameItem> _filtered(GameListState state, {DateTime? at}) {
     final wishlist = _tab == 1;
+    final now = at ?? DateTime.now().toUtc();
     return filterAndSortGames(
       wishlist
           ? state.favorites.values
           : state.games.where(
-              (g) =>
-                  state.query.isNotEmpty ||
-                  g.saleActiveAt(DateTime.now().toUtc()),
+              (g) => state.query.isNotEmpty || _showInDiscountDiscovery(g, now),
             ),
       genre: _genre,
       query: _query,
       sort: _sort,
-      now: DateTime.now().toUtc(),
+      now: now,
     );
   }
 
@@ -116,7 +122,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
     final controller = ref.read(gameListProvider.notifier);
     final now = DateTime.now().toUtc();
     final wishlist = _tab == 1;
-    final allGames = _filtered(state);
+    final allGames = _filtered(state, at: now);
     final page = allGames.isEmpty
         ? 0
         : _page.clamp(0, (allGames.length - 1) ~/ _pageSize);
@@ -160,7 +166,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                       onPressed: () => showAboutDialog(
                         context: context,
                         applicationName: 'Switch 할인 트래커 KR',
-                        applicationVersion: '1.2.0',
+                        applicationVersion: '1.2.1',
                         applicationIcon: const Icon(
                           Icons.sports_esports_rounded,
                           color: Color(0xffe60012),
@@ -251,12 +257,22 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                           ? '${state.favorites.length}개의 관심 게임을 모아봤어요.'
                                           : _query.trim().isNotEmpty
                                           ? '전체 게임 검색 · 할인하지 않는 게임도 표시해요'
-                                          : '한국 공식 할인 게임 ${state.games.where((g) => g.saleActiveAt(now)).length}개 발견',
+                                          : '한국 공식 할인 게임 ${state.games.where((g) => _showInDiscountDiscovery(g, now)).length}개 발견',
                                       style: const TextStyle(
                                         color: Color(0xff747680),
                                         fontSize: 13,
                                       ),
                                     ),
+                                    if (!wishlist && _query.trim().isEmpty) ...[
+                                      const SizedBox(height: 6),
+                                      const Text(
+                                        '판매가 1,000~4,999원 게임 제외',
+                                        style: TextStyle(
+                                          color: Color(0xff747680),
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
                                     const SizedBox(height: 20),
                                     TextField(
                                       controller: _search,
