@@ -313,7 +313,13 @@ List<GameItem> filterAndSortGames(
   required String query,
   required GameSort sort,
   required DateTime now,
+  int? discountBand,
+  GamePlatform? platform,
 }) {
+  assert(
+    discountBand == null ||
+        (discountBand >= 0 && discountBand <= 100 && discountBand % 10 == 0),
+  );
   const aliases = {
     '액션': ['액션', 'action'],
     'RPG': ['rpg', '롤플레잉', 'role-playing'],
@@ -335,7 +341,12 @@ List<GameItem> filterAndSortGames(
         game.genres.any(
           (g) => keys.any((key) => g.toLowerCase().contains(key)),
         );
-    return matchesName && matchesGenre;
+    final matchesPlatform = platform == null || game.platform == platform;
+    final matchesDiscount =
+        discountBand == null ||
+        (game.saleActiveAt(now) &&
+            game.discountRateAt(now) ~/ 10 * 10 == discountBand);
+    return matchesName && matchesGenre && matchesPlatform && matchesDiscount;
   }).toList();
   filtered.sort((a, b) {
     final result = switch (sort) {

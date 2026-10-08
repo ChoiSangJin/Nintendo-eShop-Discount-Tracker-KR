@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../domain/models/game_item.dart';
+import 'game_platform_badge.dart';
 
 String won(int? amount) =>
     amount == null ? '가격 확인 불가' : '₩${NumberFormat('#,##0').format(amount)}';
@@ -108,16 +109,23 @@ class GameCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Text(
-                      game.genres.isEmpty
-                          ? game.hardware
-                          : '${game.hardware} · ${game.genres.take(3).join(' · ')}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                      ),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        GamePlatformBadge(game: game),
+                        if (game.genres.isNotEmpty)
+                          Text(
+                            game.genres.take(3).join(' · '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 14),
                     Wrap(
@@ -262,7 +270,8 @@ Future<void> showGameDetails(
               '정가 ${won(game.regularPrice)} · ${game.discountRateAt(now)}% 할인',
             ),
           const SizedBox(height: 16),
-          Text('플랫폼  ${game.hardware}'),
+          GamePlatformBadge(game: game),
+          const SizedBox(height: 8),
           if (game.genres.isNotEmpty) Text('장르  ${game.genres.join(' · ')}'),
           if (game.releaseDate != null)
             Text('출시일  ${DateFormat('yyyy.MM.dd').format(game.releaseDate!)}'),

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/models/game_item.dart';
 import '../controllers/game_list_controller.dart';
 import '../widgets/game_card.dart';
+import '../widgets/game_filters.dart';
 
 class MainScreen extends ConsumerStatefulWidget {
   const MainScreen({super.key});
@@ -16,6 +17,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
   int _tab = 0;
   String _genre = '전체';
   String _query = '';
+  int? _discountBand;
+  GamePlatform? _platform;
   GameSort _sort = GameSort.discount;
   final _search = TextEditingController();
   Timer? _clock;
@@ -25,6 +28,12 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
   void _resetPage() {
     _page = 0;
+  }
+
+  void _resetExtraFilters() {
+    _discountBand = null;
+    _platform = null;
+    _resetPage();
   }
 
   void _changeQuery(String value) {
@@ -55,6 +64,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
       query: _query,
       sort: _sort,
       now: now,
+      discountBand: _discountBand,
+      platform: _platform,
     );
   }
 
@@ -87,7 +98,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.resumed &&
+        ModalRoute.of(context)?.isCurrent == true) {
       final last = ref.read(gameListProvider).updatedAt;
       if (last == null ||
           DateTime.now().toUtc().difference(last) >
@@ -166,7 +178,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                       onPressed: () => showAboutDialog(
                         context: context,
                         applicationName: 'Switch 할인 트래커 KR',
-                        applicationVersion: '1.2.1',
+                        applicationVersion: '1.3.0',
                         applicationIcon: const Icon(
                           Icons.sports_esports_rounded,
                           color: Color(0xffe60012),
@@ -257,7 +269,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                           ? '${state.favorites.length}개의 관심 게임을 모아봤어요.'
                                           : _query.trim().isNotEmpty
                                           ? '전체 게임 검색 · 할인하지 않는 게임도 표시해요'
-                                          : '한국 공식 할인 게임 ${state.games.where((g) => _showInDiscountDiscovery(g, now)).length}개 발견',
+                                          : '한국 공식 할인 게임 ${allGames.length}개 발견',
                                       style: const TextStyle(
                                         color: Color(0xff747680),
                                         fontSize: 13,
@@ -336,6 +348,24 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                             ),
                                           )
                                           .toList(),
+                                ),
+                              ),
+                            ),
+                            SliverPadding(
+                              padding: const EdgeInsets.fromLTRB(24, 4, 24, 0),
+                              sliver: SliverToBoxAdapter(
+                                child: GameFilters(
+                                  discountBand: _discountBand,
+                                  platform: _platform,
+                                  onDiscountChanged: (value) => setState(() {
+                                    _discountBand = value;
+                                    _resetPage();
+                                  }),
+                                  onPlatformChanged: (value) => setState(() {
+                                    _platform = value;
+                                    _resetPage();
+                                  }),
+                                  onReset: () => setState(_resetExtraFilters),
                                 ),
                               ),
                             ),
@@ -451,7 +481,9 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                             : !wishlist && state.error != null
                                             ? '게임 정보를 불러오지 못했어요'
                                             : _query.isNotEmpty ||
-                                                  _genre != '전체'
+                                                  (_genre != '전체' ||
+                                                      _discountBand != null ||
+                                                      _platform != null)
                                             ? '조건에 맞는 게임이 없어요'
                                             : wishlist
                                             ? '관심 있는 할인 게임을 추가해 보세요'
@@ -461,11 +493,17 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                           fontWeight: FontWeight.w700,
                                         ),
                                       ),
-                                      if (_query.isNotEmpty || _genre != '전체')
+                                      if (_query.isNotEmpty ||
+                                          (_genre != '전체' ||
+                                              _discountBand != null ||
+                                              _platform != null))
                                         TextButton(
                                           onPressed: () {
                                             _search.clear();
-                                            setState(() => _genre = '전체');
+                                            setState(() {
+                                              _genre = '전체';
+                                              _resetExtraFilters();
+                                            });
                                             _changeQuery('');
                                           },
                                           child: const Text('검색·필터 초기화'),
@@ -571,6 +609,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                     setState(() {
                       _tab = value;
                       _genre = '전체';
+                      _resetExtraFilters();
                     });
                     _changeQuery('');
                     controller.setQuery('');
