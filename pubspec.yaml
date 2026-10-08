@@ -1,7 +1,7 @@
 name: switch_sale_tracker
 description: 한국 Nintendo eShop 할인 게임 탐색 및 관심 목록 앱.
 publish_to: none
-version: 1.3.0+5
+version: 1.3.1+6
 environment:
   sdk: '>=3.8.0 <4.0.0'
 dependencies:

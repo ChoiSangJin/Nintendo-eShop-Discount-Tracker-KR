@@ -18,15 +18,9 @@ class GameFilters extends StatelessWidget {
 
   Future<void> _selectDiscount(BuildContext context) async {
     FocusManager.instance.primaryFocus?.unfocus();
-    final result = await showModalBottomSheet<int>(
+    final result = await showDialog<int>(
       context: context,
-      showDragHandle: true,
       useSafeArea: true,
-      isScrollControlled: true,
-      constraints: BoxConstraints(
-        maxWidth: 600,
-        maxHeight: MediaQuery.sizeOf(context).height * .8,
-      ),
       builder: (_) => _FilterOptions(
         title: '할인율 선택',
         description: '표시 할인율 기준 · 50%대는 50~59% 게임이에요.',
@@ -45,15 +39,9 @@ class GameFilters extends StatelessWidget {
 
   Future<void> _selectPlatform(BuildContext context) async {
     FocusManager.instance.primaryFocus?.unfocus();
-    final result = await showModalBottomSheet<int>(
+    final result = await showDialog<int>(
       context: context,
-      showDragHandle: true,
       useSafeArea: true,
-      isScrollControlled: true,
-      constraints: BoxConstraints(
-        maxWidth: 600,
-        maxHeight: MediaQuery.sizeOf(context).height * .8,
-      ),
       builder: (_) => _FilterOptions(
         title: '기종 선택',
         description: '게임의 출시 기종 기준 · Switch 2 Edition은 Switch 2에 포함돼요.',
@@ -132,19 +120,20 @@ class _FilterOptions extends StatelessWidget {
   final List<(int, String)> options;
 
   @override
-  Widget build(BuildContext context) => SingleChildScrollView(
-    padding: const EdgeInsets.fromLTRB(24, 4, 24, 28),
-    child: Column(
+  Widget build(BuildContext context) => AlertDialog(
+    key: const ValueKey('filter-options-dialog'),
+    insetPadding: const EdgeInsets.all(24),
+    scrollable: true,
+    title: Text(
+      title,
+      style: Theme.of(
+        context,
+      ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+    ),
+    content: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          title,
-          style: Theme.of(
-            context,
-          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 8),
         Text(
           description,
           style: const TextStyle(fontSize: 13, color: Color(0xff747680)),
@@ -166,5 +155,11 @@ class _FilterOptions extends StatelessWidget {
         ),
       ],
     ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('닫기'),
+      ),
+    ],
   );
 }

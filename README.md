@@ -6,7 +6,7 @@
 
 - 한국 정식 제목 우선 표시, Switch / Switch 2 플랫폼 구분
 - 장르·10% 단위 할인율 구간·Switch 1/2 기종 필터, 전체 게임 검색, 인기·할인율·가격·출시일 정렬
-- 할인율·기종은 작은 버튼 두 개로 표시하고 눌러 선택창을 여는 방식. Switch 2와 Switch 2 Edition은 카드·상세에서 빨간 배경과 흰색 글자로 구분
+- 할인율·기종은 작은 버튼 두 개로 표시하고 눌러 중앙 모달을 여는 방식. 시스템 내비게이션 영역을 피하고, 작은 화면·큰 글씨에서는 항목을 스크롤하며 닫기·뒤로 가기로 취소할 수 있습니다. Switch 2와 Switch 2 Edition은 카드·상세에서 빨간 배경과 흰색 글자로 구분
 - 화면당 20개와 상·하단 이전/다음 페이지 버튼, 스크롤 자동 로딩 없음
 - 평소에는 할인 게임만, 검색 시에는 할인하지 않는 게임도 표시
 - 할인 탐색에서 현재 판매가 1,000원 이상 5,000원 미만 게임 제외. 검색·관심 게임에는 가격 제한 없이 표시
@@ -59,7 +59,7 @@ python3 tool/create_signing_key.py
 bash tool/build_release.sh
 ```
 
-빌드 스크립트는 분석·테스트 후 `flutter build apk --release --target-platform android-arm64 --split-per-abi`를 실행합니다. 디버그 키로 릴리스를 서명하지 않으며, 네이티브 ABI·APK 서명을 검사하고 SHA-256 파일을 생성합니다. 결과는 `dist/switch-sale-tracker-kr-arm64-v1.3.0.apk`와 `.apk.sha256`입니다. 기존 1.0.0·1.1.0·1.2.0·1.2.1과 같은 키로 서명하고 버전 코드를 올려 찜·캐시를 유지한 업데이트 설치를 지원합니다. 다른 CPU용 라이브러리가 없어 범용 APK보다 작습니다. 32비트 전용 기기·x86 에뮬레이터에서는 설치할 수 없습니다.
+빌드 스크립트는 분석·테스트 후 `flutter build apk --release --target-platform android-arm64 --split-per-abi`를 실행합니다. 디버그 키로 릴리스를 서명하지 않으며, 네이티브 ABI·APK 서명을 검사하고 SHA-256 파일을 생성합니다. 결과는 `dist/switch-sale-tracker-kr-arm64-v1.3.1.apk`와 `.apk.sha256`입니다. 기존 1.0.0·1.1.0·1.2.0·1.2.1·1.3.0과 같은 키로 서명하고 버전 코드를 올려 찜·캐시를 유지한 업데이트 설치를 지원합니다. 다른 CPU용 라이브러리가 없어 범용 APK보다 작습니다. 32비트 전용 기기·x86 에뮬레이터에서는 설치할 수 없습니다.
 
 CI는 PR·main에서 분석·테스트합니다. 수동 실행하는 `release.yml`을 사용하려면 저장소 **Settings → Secrets and variables → Actions**에 동일 릴리스 키의 다음 값을 안전하게 등록해야 합니다.
 
