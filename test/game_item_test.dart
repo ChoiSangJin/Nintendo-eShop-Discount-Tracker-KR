@@ -4,6 +4,156 @@ import 'package:switch_sale_tracker/presentation/controllers/game_list_controlle
 import 'support/fakes.dart';
 
 void main() {
+  test(
+    'platform metadata keeps generations and editions distinct through storage',
+    () {
+      for (final hardware in [
+        'Nintendo Switch 2',
+        'Nintendo Switch 2 Edition',
+      ]) {
+        final restored = GameItem.fromJson(
+          exampleGame(hardware: hardware).toJson(),
+        );
+        expect(restored.platform, GamePlatform.switch2);
+        expect(restored.platformLabel, hardware.replaceFirst('Nintendo ', ''));
+      }
+      expect(
+        exampleGame(name: 'Switch 2 이름의 Switch 1 게임').platform,
+        GamePlatform.switch1,
+      );
+      final unknown = exampleGame(hardware: 'Unknown platform');
+      expect(unknown.platform, GamePlatform.unknown);
+      expect(unknown.platformLabel, 'Unknown platform');
+    },
+  );
+  test(
+    'discount decade/platform filters combine with genre, query and sorting',
+    () {
+      final now = DateTime.utc(2026, 10, 8);
+      final games = [
+        exampleGame(
+          id: '1',
+          name: '페르소나 50',
+          regular: 20000,
+          discount: 10000,
+          genres: ['RPG'],
+          hardware: 'Nintendo Switch 2',
+        ),
+        exampleGame(
+          id: '2',
+          name: 'Persona 59',
+          regular: 20000,
+          discount: 8200,
+          genres: ['RPG'],
+          hardware: 'Nintendo Switch 2 Edition',
+        ),
+        exampleGame(
+          id: '3',
+          name: '페르소나 60',
+          regular: 20000,
+          discount: 8000,
+          genres: ['RPG'],
+          hardware: 'Nintendo Switch 2',
+        ),
+        exampleGame(
+          id: '4',
+          name: '페르소나 50 Switch 1',
+          regular: 20000,
+          discount: 10000,
+          genres: ['RPG'],
+        ),
+        exampleGame(
+          id: '5',
+          name: '다른 제목',
+          regular: 20000,
+          discount: 10000,
+          genres: ['RPG'],
+          hardware: 'Nintendo Switch 2',
+        ),
+        exampleGame(
+          id: '6',
+          name: '페르소나 장르',
+          regular: 20000,
+          discount: 10000,
+          genres: ['Puzzle'],
+          hardware: 'Nintendo Switch 2',
+        ),
+        exampleGame(
+          id: '7',
+          name: '페르소나 종료',
+          regular: 20000,
+          discount: 10000,
+          end: now,
+          genres: ['RPG'],
+          hardware: 'Nintendo Switch 2',
+        ),
+        exampleGame(
+          id: '8',
+          name: '페르소나 미확인',
+          regular: 20000,
+          discount: 10000,
+          genres: ['RPG'],
+          hardware: 'Unknown platform',
+        ),
+      ];
+      final filtered = filterAndSortGames(
+        games,
+        genre: 'RPG',
+        query: 'Persona',
+        sort: GameSort.price,
+        now: now,
+        discountBand: 50,
+        platform: GamePlatform.switch2,
+      );
+      expect(filtered.map((g) => g.id), ['2', '1']);
+      expect(
+        filterAndSortGames(
+          games,
+          genre: '전체',
+          query: '',
+          sort: GameSort.price,
+          now: now,
+        ),
+        hasLength(8),
+      );
+    },
+  );
+  test(
+    'discount boundaries use displayed percent and never treat full-price games as 0% sales',
+    () {
+      final now = DateTime.utc(2026, 10, 8);
+      final games = [
+        exampleGame(id: '49', regular: 20000, discount: 10200),
+        exampleGame(
+          id: '50',
+          regular: 20000,
+          discount: 10080,
+        ), // 49.6%, displayed 50%.
+        exampleGame(id: '59', regular: 20000, discount: 8200),
+        exampleGame(
+          id: '60',
+          regular: 20000,
+          discount: 8080,
+        ), // 59.6%, displayed 60%.
+        exampleGame(id: '0', regular: 20000, discount: 19960),
+        exampleGame(id: 'regular', regular: 20000, discount: null),
+        exampleGame(id: 'expired', regular: 20000, discount: 10000, end: now),
+        exampleGame(id: 'free', regular: 20000, discount: 0),
+      ];
+      List<String> band(int value) => filterAndSortGames(
+        games,
+        genre: '전체',
+        query: '',
+        sort: GameSort.price,
+        now: now,
+        discountBand: value,
+      ).map((g) => g.id).toList();
+      expect(band(50), ['59', '50']);
+      expect(band(60), ['60']);
+      expect(band(0), ['0']);
+      expect(band(100), ['free']);
+    },
+  );
   test('prices distinguish unknown from free and reject invalid amounts', () {
     expect(parsePrice('74,800원'), 74800);
     expect(parsePrice('0'), 0);

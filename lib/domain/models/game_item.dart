@@ -14,6 +14,8 @@ int? parsePrice(dynamic value) {
 DateTime? parseDate(dynamic value) =>
     value is String ? DateTime.tryParse(value) : null;
 
+enum GamePlatform { switch1, switch2, unknown }
+
 class GameItem {
   const GameItem({
     required this.id,
@@ -44,6 +46,21 @@ class GameItem {
   final DateTime? priceCheckedAt;
   final String hardware;
   final int? popularityRank;
+
+  GamePlatform get platform => switch (hardware.trim().toLowerCase()) {
+    'nintendo switch' => GamePlatform.switch1,
+    'nintendo switch 2' || 'nintendo switch 2 edition' => GamePlatform.switch2,
+    _ => GamePlatform.unknown,
+  };
+
+  String get platformLabel => switch (platform) {
+    GamePlatform.switch1 => 'Switch 1',
+    GamePlatform.switch2 =>
+      hardware.trim().toLowerCase().endsWith('edition')
+          ? 'Switch 2 Edition'
+          : 'Switch 2',
+    GamePlatform.unknown => hardware.trim().isEmpty ? '기종 미확인' : hardware,
+  };
 
   static int calculateDiscountRate(int? regular, int? discount) {
     if (regular == null ||

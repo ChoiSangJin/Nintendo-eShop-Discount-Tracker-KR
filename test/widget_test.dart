@@ -6,9 +6,165 @@ import 'dart:async';
 import 'package:switch_sale_tracker/data/repositories/game_repository.dart';
 import 'package:switch_sale_tracker/presentation/widgets/game_card.dart';
 import 'package:switch_sale_tracker/presentation/controllers/game_list_controller.dart';
+import 'package:switch_sale_tracker/domain/models/game_item.dart';
+import 'package:switch_sale_tracker/presentation/widgets/game_platform_badge.dart';
 import 'support/fakes.dart';
 
 void main() {
+  testWidgets(
+    'discount/platform selection composes before paging and resets cleanly',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 1100);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repo = FakeRepository()
+        ..games = [
+          for (var i = 0; i < 23; i++)
+            exampleGame(
+              id: '${70010000000000 + i}',
+              name: '테스트 ${i.toString().padLeft(2, '0')}',
+              regular: 20000,
+              discount: 10000,
+              hardware: i == 22
+                  ? 'Nintendo Switch 2 Edition'
+                  : i.isEven
+                  ? 'Nintendo Switch 2'
+                  : 'Nintendo Switch',
+            ),
+          exampleGame(
+            id: '70010000000100',
+            name: '40퍼센트',
+            regular: 20000,
+            discount: 12000,
+            hardware: 'Nintendo Switch 2',
+          ),
+          exampleGame(
+            id: '70010000000101',
+            name: '60퍼센트',
+            regular: 20000,
+            discount: 8000,
+          ),
+          exampleGame(
+            id: '70010000000102',
+            name: '정가 게임',
+            regular: 20000,
+            discount: null,
+            hardware: 'Nintendo Switch 2',
+          ),
+        ];
+      final store = MemoryStore();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            localStoreProvider.overrideWithValue(store),
+            gameRepositoryProvider.overrideWithValue(repo),
+          ],
+          child: const TrackerApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('다음').first);
+      await tester.pumpAndSettle();
+      expect(find.text('5개 표시 · 2페이지'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('discount-filter-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ChoiceChip, '50%대'));
+      await tester.pumpAndSettle();
+      expect(find.text('20개 표시 · 1페이지'), findsOneWidget);
+      expect(find.text('한국 공식 할인 게임 23개 발견'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('discount-filter-button')));
+      await tester.pumpAndSettle();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('할인율 50%대 ▾'), findsOneWidget);
+      expect(find.text('한국 공식 할인 게임 23개 발견'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('platform-filter-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Switch 2'));
+      await tester.pumpAndSettle();
+      expect(find.text('12개 표시 · 1페이지'), findsOneWidget);
+      expect(find.text('한국 공식 할인 게임 12개 발견'), findsOneWidget);
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, '다음').first,
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester.widget<GameCard>(find.byType(GameCard).first).game.platform,
+        GamePlatform.switch2,
+      );
+      await tester.enterText(find.byType(TextField), '테스트 00');
+      await tester.pumpAndSettle();
+      expect(find.text('1개 표시 · 1페이지'), findsOneWidget);
+      await tester.tap(find.byTooltip('관심 게임에 추가').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('관심 게임'));
+      await tester.pumpAndSettle();
+      expect(find.text('할인율 전체 ▾'), findsOneWidget);
+      expect(find.text('기종 전체 ▾'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('platform-filter-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Switch 1'));
+      await tester.pumpAndSettle();
+      expect(find.text('조건에 맞는 게임이 없어요'), findsOneWidget);
+      await tester.ensureVisible(find.text('검색·필터 초기화'));
+      await tester.tap(find.text('검색·필터 초기화'));
+      await tester.pumpAndSettle();
+      expect(find.text('테스트 00'), findsOneWidget);
+      expect(repo.catalogCalls, 1);
+      expect(store.games, hasLength(26));
+      expect(store.readFavorites(), hasLength(1));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'Switch 2 Edition has a red platform badge in cards and details',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final game = exampleGame(hardware: 'Nintendo Switch 2 Edition');
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GameCard(
+              game: game,
+              favorite: false,
+              onFavorite: () {},
+              now: DateTime.now(),
+            ),
+          ),
+        ),
+      );
+      Color? badgeColor() =>
+          (tester
+                      .widget<Container>(
+                        find
+                            .descendant(
+                              of: find.byType(GamePlatformBadge).last,
+                              matching: find.byType(Container),
+                            )
+                            .first,
+                      )
+                      .decoration
+                  as BoxDecoration)
+              .color;
+      expect(find.text('Switch 2 Edition'), findsOneWidget);
+      expect(badgeColor(), const Color(0xffe60012));
+      await tester.tap(find.text(game.name));
+      await tester.pumpAndSettle();
+      expect(find.byType(GamePlatformBadge), findsNWidgets(2));
+      expect(badgeColor(), const Color(0xffe60012));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   testWidgets(
     'price exclusion precedes sorting/paging but preserves full search and favorites',
     (tester) async {
@@ -292,6 +448,27 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('discount-filter-button')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.byKey(const ValueKey('discount-filter-button')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.widgetWithText(ChoiceChip, '50%대'));
+    await tester.tap(find.widgetWithText(ChoiceChip, '50%대'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('platform-filter-button')),
+    );
+    await tester.tap(find.byKey(const ValueKey('platform-filter-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Switch 2'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byTooltip('할인율·기종 필터 초기화'));
+    await tester.pumpAndSettle();
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -500));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
@@ -343,6 +520,11 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('재시도'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('재시도'), findsOneWidget);
     repository.failure = null;
     await tester.ensureVisible(find.text('재시도'));

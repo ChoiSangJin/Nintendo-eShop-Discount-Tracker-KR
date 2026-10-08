@@ -12,6 +12,7 @@ GameItem exampleGame({
   List<String> genres = const ['액션'],
   DateTime? releaseDate,
   DateTime? end,
+  String hardware = 'Nintendo Switch',
 }) => GameItem(
   id: id,
   name: name,
@@ -21,6 +22,7 @@ GameItem exampleGame({
   discountPrice: discount,
   releaseDate: releaseDate,
   discountEnd: end,
+  hardware: hardware,
   priceCheckedAt: DateTime.now().toUtc(),
 );
 
