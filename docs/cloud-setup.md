@@ -3,7 +3,8 @@
 기존 `/workspace/Nintendo-eShop-Discount-Tracker-KR` 체크아웃을 사용합니다. 사용자가 요청하지 않으면 Git worktree를 만들지 않습니다. 도구는 `/workspace/toolchains`에, 서명 키는 `/workspace/signing/switch-tracker`에 보관합니다.
 
 ```bash
-export PATH=/workspace/toolchains/flutter/bin:$PATH
+export JAVA_HOME=/workspace/toolchains/jdk
+export PATH=$JAVA_HOME/bin:/workspace/toolchains/flutter/bin:$PATH
 export CI=true FLUTTER_SUPPRESS_ANALYTICS=true
 export PUB_CACHE=/workspace/toolchains/pub-cache
 export XDG_CONFIG_HOME=/workspace/toolchains/config
