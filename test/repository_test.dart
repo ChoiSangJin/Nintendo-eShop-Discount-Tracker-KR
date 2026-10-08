@@ -3,68 +3,63 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:switch_sale_tracker/data/datasources/korean_title_resolver.dart';
 import 'package:switch_sale_tracker/data/repositories/game_repository.dart';
-import 'package:switch_sale_tracker/domain/models/popularity_index.dart';
 import 'support/fakes.dart';
 
 void main() {
   test(
-    'popular discovery resolves regional IDs and only prices confirmed KR titles',
+    'complete collection recovers unstable boundaries, deduplicates IDs and bounds all requests',
     () async {
       final dio = Dio();
-      final popularity = PopularityIndex(
-        {'70010000000999': 1},
-        byTitle: {PopularityIndex.key('Hogwarts Legacy', 'Nintendo Switch'): 1},
-        entries: [
-          const PopularityEntry(
-            '70010000000999',
-            'Hogwarts Legacy',
-            'Nintendo Switch',
-            1,
-          ),
-        ],
+      var active = 0, maxActive = 0;
+      final catalogCalls = <num>[];
+      final priceCounts = <int>[];
+      final records = List.generate(
+        121,
+        (i) => {
+          'sys': {'id': 'record-$i'},
+          'nsuid': i == 120
+              ? '0000'
+              : '${70010000000000 + (i == 119 ? 118 : i)}',
+          'title': '공식 게임 $i',
+        },
       );
+      final progress = <CatalogProgress>[];
       dio.interceptors.add(
         InterceptorsWrapper(
-          onRequest: (options, handler) {
-            final search = options.uri.path == '/kr/api/search';
-            if (!search) {
-              expect(options.queryParameters['ids'], '70010000000001');
+          onRequest: (options, handler) async {
+            active++;
+            maxActive = active > maxActive ? active : maxActive;
+            await Future<void>.delayed(const Duration(milliseconds: 2));
+            Map<String, dynamic> data;
+            if (options.uri.path == '/kr/api/software') {
+              final page = options.queryParameters['spage'] as num;
+              catalogCalls.add(page);
+              final offset = ((page - 1) * 24).round();
+              final items = records.skip(offset).take(24).toList();
+              if (page == 2 && options.queryParameters['sfsort'] != 'adate') {
+                items[0] = records[0];
+              }
+              data = {'items': items, 'total': records.length};
+            } else {
               expect(options.queryParameters['country'], 'KR');
-            }
-            handler.resolve(
-              Response(
-                requestOptions: options,
-                data: search
-                    ? {
-                        'items': [
-                          {
-                            'nsuid': '70010000000001',
-                            'title': '호그와트 레거시 (Hogwarts Legacy)',
-                            'hardwareCategory': 'Nintendo Switch',
-                          },
-                          {
-                            'nsuid': '70010000000002',
-                            'title': 'Hogwarts Legacy Deluxe Edition',
-                            'hardwareCategory': 'Nintendo Switch',
-                          },
-                          {
-                            'nsuid': '70010000000003',
-                            'title': 'Hogwarts Legacy',
-                            'hardwareCategory': 'Nintendo Switch 2',
-                          },
-                        ],
-                      }
-                    : {
-                        'prices': [
-                          {
-                            'title_id': '70010000000001',
-                            'regular_price': {'raw_value': '50000'},
-                            'discount_price': {'raw_value': '10000'},
-                          },
-                        ],
+              expect(options.queryParameters['lang'], 'ko');
+              final ids = (options.queryParameters['ids'] as String).split(',');
+              priceCounts.add(ids.length);
+              data = {
+                'prices': ids
+                    .skip(1)
+                    .map(
+                      (id) => {
+                        'title_id': id,
+                        'regular_price': {'raw_value': '10000'},
+                        'discount_price': {'raw_value': '7000'},
                       },
-              ),
-            );
+                    )
+                    .toList(),
+              };
+            }
+            active--;
+            handler.resolve(Response(requestOptions: options, data: data));
           },
         ),
       );
@@ -72,60 +67,74 @@ void main() {
         dio,
         KoreanTitleResolver(dio, MemoryStore()),
       );
-      final games = await repo.fetchPopularGames(popularity);
-      expect(games.single.id, '70010000000001');
-      expect(games.single.popularityRank, 1);
-      expect(games.single.name, '호그와트 레거시 (Hogwarts Legacy)');
-      expect(games.single.saleActiveAt(DateTime.now()), isTrue);
+      final games = await repo.fetchCatalog(onProgress: progress.add);
+      expect(games, hasLength(119));
+      expect(games.any((g) => g.name == '공식 게임 24'), isTrue);
+      expect(games.map((g) => g.id).toSet(), hasLength(119));
+      expect(games.any((g) => g.priceAt(DateTime.now()) == null), isTrue);
+      expect(catalogCalls, containsAll([1, 2, 3, 4, 5, 6]));
+      expect(priceCounts, [30, 30, 30, 29]);
+      expect(maxActive, 4);
+      expect(
+        progress.where((p) => p.label == '전체 게임 목록 확인 중').last.completed,
+        121,
+      );
+      expect(progress.last.completed, 119);
+      dio.close();
     },
   );
   test(
-    'full-catalog search retains regular-price games and raw pagination',
+    'truncated catalog or final price failure rejects whole collection',
     () async {
-      final dio = Dio();
-      dio.interceptors.add(
-        InterceptorsWrapper(
-          onRequest: (options, handler) {
-            final search = options.uri.path == '/kr/api/search';
-            if (search) {
-              expect(options.queryParameters['k'], '포켓몬');
-              expect(options.queryParameters['directory'], 'software');
-              expect(options.queryParameters['p'], 2);
-            }
-            handler.resolve(
-              Response(
-                requestOptions: options,
-                data: search
-                    ? {
-                        'total': 100,
-                        'items': [
-                          {'nsuid': '70010000000001', 'title': '포켓몬스터'},
-                          {'nsuid': '0000', 'title': '예정 게임'},
-                        ],
-                      }
-                    : {
-                        'prices': [
-                          {
-                            'title_id': '70010000000001',
-                            'regular_price': {'raw_value': '64800'},
-                          },
-                        ],
-                      },
-              ),
-            );
-          },
-        ),
-      );
-      final repo = NintendoGameRepository(
-        dio,
-        KoreanTitleResolver(dio, MemoryStore()),
-      );
-      final page = await repo.searchPage('포켓몬', 24);
-      expect(page.nextOffset, 26);
-      expect(page.total, 100);
-      expect(page.games.single.name, '포켓몬스터');
-      expect(page.games.single.priceAt(DateTime.now()), 64800);
-      expect(page.games.single.saleActiveAt(DateTime.now()), isFalse);
+      for (final truncated in [true, false]) {
+        final dio = Dio();
+        dio.interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) {
+              if (options.uri.path == '/kr/api/software') {
+                final page = options.queryParameters['spage'] as num;
+                handler.resolve(
+                  Response(
+                    requestOptions: options,
+                    data: {
+                      'total': 25,
+                      'items': page == 1
+                          ? List.generate(
+                              24,
+                              (i) => {
+                                'sys': {'id': 'r$i'},
+                                'nsuid': '${70010000000000 + i}',
+                                'title': '게임 $i',
+                              },
+                            )
+                          : truncated
+                          ? []
+                          : [
+                              {
+                                'sys': {'id': 'r24'},
+                                'nsuid': '70010000000024',
+                                'title': '게임 24',
+                              },
+                            ],
+                    },
+                  ),
+                );
+              } else {
+                handler.reject(DioException(requestOptions: options));
+              }
+            },
+          ),
+        );
+        final repo = NintendoGameRepository(
+          dio,
+          KoreanTitleResolver(dio, MemoryStore()),
+        );
+        await expectLater(
+          repo.fetchCatalog(),
+          truncated ? throwsFormatException : throwsA(isA<DioException>()),
+        );
+        dio.close();
+      }
     },
   );
   test(
@@ -160,85 +169,6 @@ void main() {
         ),
         throwsFormatException,
       );
-    },
-  );
-  test(
-    'retired sales API falls back to official Korean titles and real discounts',
-    () async {
-      final dio = Dio();
-      var legacyCalls = 0;
-      final catalogPages = <int>[];
-      dio.interceptors.add(
-        InterceptorsWrapper(
-          onRequest: (options, handler) {
-            if (options.uri.host == 'ec.nintendo.com') {
-              legacyCalls++;
-              handler.reject(
-                DioException(
-                  requestOptions: options,
-                  response: Response(requestOptions: options, statusCode: 404),
-                ),
-              );
-            } else if (options.uri.host == 'www.nintendo.com') {
-              final page = options.queryParameters['spage'] as int;
-              catalogPages.add(page);
-              handler.resolve(
-                Response(
-                  requestOptions: options,
-                  data: {
-                    'total': 200,
-                    'items': List.generate(
-                      24,
-                      (index) => {
-                        'nsuid': '${70010000000000 + page * 100 + index}',
-                        'title': '공식 한국명 $page-$index',
-                        'releaseDateDownload': '2026-01-01',
-                      },
-                    ),
-                  },
-                ),
-              );
-            } else {
-              final ids = (options.queryParameters['ids'] as String).split(',');
-              expect(ids.length, lessThanOrEqualTo(30));
-              handler.resolve(
-                Response(
-                  requestOptions: options,
-                  data: {
-                    'prices': ids
-                        .map(
-                          (id) => {
-                            'title_id': id,
-                            'regular_price': {'raw_value': '10000'},
-                            if (id.endsWith('00'))
-                              'discount_price': {'raw_value': '5000'},
-                          },
-                        )
-                        .toList(),
-                  },
-                ),
-              );
-            }
-          },
-        ),
-      );
-      final repository = NintendoGameRepository(
-        dio,
-        KoreanTitleResolver(dio, MemoryStore()),
-      );
-      final first = await repository.fetchPage(0);
-      expect(first.catalogFallback, isTrue);
-      expect(first.nextOffset, 96);
-      expect(first.games, hasLength(4));
-      expect(
-        first.games.every(
-          (g) => g.name.startsWith('공식 한국명') && g.saleActiveAt(DateTime.now()),
-        ),
-        isTrue,
-      );
-      await repository.fetchPage(first.nextOffset);
-      expect(legacyCalls, 1);
-      expect(catalogPages, [1, 2, 3, 4, 5, 6, 7, 8]);
     },
   );
   test('61 price lookups use exactly 30/30/1 IDs and KR/ko', () async {
@@ -281,39 +211,6 @@ void main() {
     expect(counts, [30, 30, 1]);
     expect(priced, hasLength(61));
     expect(priced.every((g) => g.discountRateAt(DateTime.now()) == 30), isTrue);
-  });
-  test('page offsets follow raw entries, missing prices are unknown', () async {
-    final dio = Dio();
-    dio.interceptors.add(
-      InterceptorsWrapper(
-        onRequest: (options, handler) {
-          final sales = options.uri.host == 'ec.nintendo.com';
-          if (sales) expect(options.queryParameters['offset'], 30);
-          handler.resolve(
-            Response(
-              requestOptions: options,
-              data: sales
-                  ? {
-                      'total': 100,
-                      'contents': [
-                        {'id': '70010000000001', 'formal_name': '한국 게임'},
-                        {'id': 'invalid', 'formal_name': '잘못된 항목'},
-                      ],
-                    }
-                  : {'prices': []},
-            ),
-          );
-        },
-      ),
-    );
-    final page = await NintendoGameRepository(
-      dio,
-      KoreanTitleResolver(dio, MemoryStore()),
-    ).fetchPage(30);
-    expect(page.games, hasLength(1));
-    expect(page.nextOffset, 32);
-    expect(page.total, 100);
-    expect(page.games.single.priceAt(DateTime.now()), isNull);
   });
   test('official Korean title requires an exact matching NSUID canonical', () {
     const body =

@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:switch_sale_tracker/data/datasources/korean_title_resolver.dart';
 import 'package:switch_sale_tracker/data/datasources/local_store.dart';
 import 'package:switch_sale_tracker/data/repositories/game_repository.dart';
+import 'package:switch_sale_tracker/presentation/controllers/game_list_controller.dart';
 
 // Read-only live probe. Never use fixture or sample game data in this check.
 void main() {
@@ -32,68 +33,93 @@ void main() {
         KoreanTitleResolver(dio, _TitleStore()),
       );
       try {
-        final page = await repository.fetchPage(0);
-        if (page.games.isEmpty) {
-          throw StateError('No live sale returned; readiness not established.');
-        }
-        if (!page.games.every((g) => g.saleActiveAt(DateTime.now().toUtc()))) {
-          throw StateError('Returned a non-sale game');
-        }
-        final korean = page.games.where((g) => hasHangul(g.name)).length;
-        if (korean == 0) {
-          throw StateError('No official Korean game title verified.');
-        }
-        stdout.writeln(
-          'Live KR catalog and batched KRW prices: ${page.games.length} discounted games, '
-          '$korean Korean titles; next offset ${page.nextOffset}.',
+        final games = await repository.fetchCatalog(
+          onProgress: (p) {
+            if (p.completed == p.total) {
+              stdout.writeln('${p.label}: ${p.completed}/${p.total}');
+            }
+          },
         );
-        for (final game in page.games.take(5)) {
-          stdout.writeln(
-            '${game.id} | ${game.name} | ${game.regularPrice} -> ${game.discountPrice} KRW',
+        final now = DateTime.now().toUtc();
+        final sales = games.where((g) => g.saleActiveAt(now)).toList();
+        expect(games.map((g) => g.id).toSet().length, games.length);
+        expect(sales, isNotEmpty);
+        final persona = filterAndSortGames(
+          games,
+          genre: '전체',
+          query: '페르소나',
+          sort: GameSort.discount,
+          now: now,
+        );
+        expect(
+          persona.any((g) => normalizeSearch(g.name).contains('페르소나3')),
+          isTrue,
+        );
+        expect(
+          persona.any((g) => normalizeSearch(g.name).contains('페르소나5')),
+          isTrue,
+        );
+        final pokemon = filterAndSortGames(
+          games,
+          genre: '전체',
+          query: '포켓몬',
+          sort: GameSort.discount,
+          now: now,
+        );
+        expect(
+          pokemon.any((g) => g.regularPrice != null && !g.saleActiveAt(now)),
+          isTrue,
+        );
+        for (final sort in [
+          GameSort.discount,
+          GameSort.price,
+          GameSort.newest,
+        ]) {
+          final sorted = filterAndSortGames(
+            sales,
+            genre: '전체',
+            query: '',
+            sort: sort,
+            now: now,
           );
+          for (var i = 1; i < sorted.length; i++) {
+            if (sort == GameSort.discount) {
+              expect(
+                compareDiscount(sorted[i - 1], sorted[i], now),
+                lessThanOrEqualTo(0),
+              );
+            }
+            if (sort == GameSort.price) {
+              expect(
+                sorted[i - 1].priceAt(now),
+                lessThanOrEqualTo(sorted[i].priceAt(now)!),
+              );
+            }
+            if (sort == GameSort.newest) {
+              expect(
+                (sorted[i - 1].releaseDate ?? DateTime(1970)).isBefore(
+                  sorted[i].releaseDate ?? DateTime(1970),
+                ),
+                isFalse,
+              );
+            }
+          }
         }
-        final search = await repository.searchPage('포켓몬', 0);
-        expect(search.games, isNotEmpty);
-        expect(
-          search.games.any(
-            (g) =>
-                g.regularPrice != null &&
-                !g.saleActiveAt(DateTime.now().toUtc()),
-          ),
-          isTrue,
-        );
-        expect(search.games.any((g) => hasHangul(g.name)), isTrue);
         final ranks = await repository.fetchPopularity();
-        expect(ranks.byId, isNotEmpty);
-        expect(ranks.byId.values.every((rank) => rank > 0), isTrue);
-        final matched = [
-          ...page.games,
-          ...search.games,
-        ].where((g) => ranks.rankFor(g) != null).length;
+        expect(games.any((g) => ranks.rankFor(g) != null), isTrue);
         stdout.writeln(
-          'Live full-catalog Pokémon search: ${search.games.length} valid games, including regular-price titles; US official Best Sellers: ${ranks.byId.length} NSUID ranks, $matched verified KR title/platform matches.',
+          'Live complete KR catalog: ${games.length} valid unique NSUIDs, ${sales.length} active discounts, ${persona.length} Persona matches, ${pokemon.length} Pokémon matches. Global discount/price/release order verified across every 20-item page.',
         );
-        expect(matched, greaterThan(0));
-        final popular = await repository.fetchPopularGames(ranks);
-        expect(popular, isNotEmpty);
-        expect(
-          popular.every(
-            (g) =>
-                g.saleActiveAt(DateTime.now().toUtc()) &&
-                g.popularityRank != null,
-          ),
-          isTrue,
-        );
-        stdout.writeln(
-          'Live popular-first discovery: ${popular.length} discounted KR games resolved from the US official list.',
-        );
+        for (final g in persona) {
+          stdout.writeln('${g.name}: ${g.priceAt(now)} KRW');
+        }
       } finally {
         dio.close(force: true);
         HttpOverrides.global = null;
       }
     },
     skip: Platform.environment['RUN_LIVE_SMOKE'] != '1',
-    timeout: const Timeout(Duration(minutes: 3)),
+    timeout: const Timeout(Duration(minutes: 8)),
   );
 }
 

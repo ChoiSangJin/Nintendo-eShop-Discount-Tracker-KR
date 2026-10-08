@@ -4,8 +4,14 @@ import '../../domain/models/game_item.dart';
 abstract class LocalStore {
   List<GameItem> readGames();
   List<GameItem> readFavorites();
+  bool get catalogComplete;
   DateTime? get cachedAt;
-  Future<void> saveGames(List<GameItem> games, DateTime at);
+  DateTime? get catalogFetchedAt;
+  Future<void> saveGames(
+    List<GameItem> games,
+    DateTime at, {
+    DateTime? catalogAt,
+  });
   Future<void> saveFavorite(GameItem game);
   Future<void> removeFavorite(String id);
   String? readKoreanTitle(String id);
@@ -43,18 +49,51 @@ class HiveLocalStore implements LocalStore {
 
   @override
   List<GameItem> readGames() {
-    final value = cache.get('games', defaultValue: <dynamic>[]);
+    final snapshot = cache.get('catalog_snapshot_v2');
+    final value = snapshot is Map
+        ? snapshot['games']
+        : cache.get('games', defaultValue: <dynamic>[]);
     return value is List ? _decode(value) : [];
   }
 
   @override
   List<GameItem> readFavorites() => _decode(favorites.values);
   @override
-  DateTime? get cachedAt => parseDate(cache.get('updated_at'));
+  DateTime? get cachedAt {
+    final snapshot = cache.get('catalog_snapshot_v2');
+    return parseDate(
+      snapshot is Map ? snapshot['updated_at'] : cache.get('updated_at'),
+    );
+  }
+
   @override
-  Future<void> saveGames(List<GameItem> games, DateTime at) => cache.putAll({
+  DateTime? get catalogFetchedAt {
+    final snapshot = cache.get('catalog_snapshot_v2');
+    return snapshot is Map ? parseDate(snapshot['catalog_at']) : null;
+  }
+
+  @override
+  bool get catalogComplete {
+    final snapshot = cache.get('catalog_snapshot_v2');
+    if (snapshot is! Map || snapshot['games'] is! List || cachedAt == null) {
+      return false;
+    }
+    final raw = snapshot['games'] as List;
+    final decoded = _decode(raw);
+    return raw.isNotEmpty &&
+        decoded.length == raw.length &&
+        decoded.map((g) => g.id).toSet().length == raw.length;
+  }
+
+  @override
+  Future<void> saveGames(
+    List<GameItem> games,
+    DateTime at, {
+    DateTime? catalogAt,
+  }) => cache.put('catalog_snapshot_v2', {
     'games': games.map((g) => g.toJson()).toList(),
     'updated_at': at.toIso8601String(),
+    'catalog_at': (catalogAt ?? at).toIso8601String(),
   });
   @override
   Future<void> saveFavorite(GameItem game) =>

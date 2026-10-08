@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/datasources/korean_title_resolver.dart';
@@ -49,73 +48,59 @@ class GameListState {
   const GameListState({
     this.games = const [],
     this.favorites = const {},
-    this.total,
-    this.nextOffset = 0,
-    this.hasMore = false,
     this.loading = true,
-    this.loadingMore = false,
     this.cached = true,
+    this.complete = false,
     this.updatedAt,
     this.error,
     this.storageError,
-    this.catalogFallback = false,
     this.query = '',
     this.loadingPopularity = false,
     this.popularityError,
+    this.progress,
+    this.savingFavorite = false,
   });
   final List<GameItem> games;
   final Map<String, GameItem> favorites;
-  final int? total;
-  final int nextOffset;
-  final bool hasMore;
-  final bool loading;
-  final bool loadingMore;
-  final bool cached;
+  final bool loading, cached, complete, loadingPopularity, savingFavorite;
   final DateTime? updatedAt;
-  final String? error;
-  final String? storageError;
-  final bool catalogFallback;
+  final String? error, storageError, popularityError;
   final String query;
-  final bool loadingPopularity;
-  final String? popularityError;
-
+  final CatalogProgress? progress;
+  bool get busy => loading || loadingPopularity || savingFavorite;
   GameListState copyWith({
     List<GameItem>? games,
     Map<String, GameItem>? favorites,
-    int? total,
-    int? nextOffset,
-    bool? hasMore,
     bool? loading,
-    bool? loadingMore,
     bool? cached,
+    bool? complete,
     DateTime? updatedAt,
     String? error,
     bool clearError = false,
     String? storageError,
     bool clearStorageError = false,
-    bool? catalogFallback,
     String? query,
     bool? loadingPopularity,
     String? popularityError,
     bool clearPopularityError = false,
+    CatalogProgress? progress,
+    bool? savingFavorite,
   }) => GameListState(
     games: games ?? this.games,
     favorites: favorites ?? this.favorites,
-    total: total ?? this.total,
-    nextOffset: nextOffset ?? this.nextOffset,
-    hasMore: hasMore ?? this.hasMore,
     loading: loading ?? this.loading,
-    loadingMore: loadingMore ?? this.loadingMore,
     cached: cached ?? this.cached,
+    complete: complete ?? this.complete,
     updatedAt: updatedAt ?? this.updatedAt,
     error: clearError ? null : error ?? this.error,
     storageError: clearStorageError ? null : storageError ?? this.storageError,
-    catalogFallback: catalogFallback ?? this.catalogFallback,
     query: query ?? this.query,
     loadingPopularity: loadingPopularity ?? this.loadingPopularity,
     popularityError: clearPopularityError
         ? null
         : popularityError ?? this.popularityError,
+    progress: progress ?? this.progress,
+    savingFavorite: savingFavorite ?? this.savingFavorite,
   );
 }
 
@@ -124,46 +109,19 @@ class GameListController extends StateNotifier<GameListState> {
     : super(
         GameListState(
           games: store.readGames(),
-          favorites: {for (final game in store.readFavorites()) game.id: game},
+          complete: store.catalogComplete,
+          favorites: {for (final g in store.readFavorites()) g.id: g},
           updatedAt: store.cachedAt,
         ),
       );
   final GameRepository repository;
   final LocalStore store;
-  int _generation = 0;
+  static const cacheLifetime = Duration(minutes: 15);
   final Set<String> _favoriteWrites = {};
-  Timer? _searchDebounce;
   PopularityIndex? _popularity;
-  List<GameItem> _popularGames = [];
-  bool _popularityEnabled = false;
-  DateTime? _popularCheckedAt;
-
-  void setPopularityEnabled(bool enabled) => _popularityEnabled = enabled;
-
-  void setQuery(String value) {
-    final query = value.trim();
-    if (query == state.query) return;
-    _searchDebounce?.cancel();
-    ++_generation; // Invalidate both pending search and pagination immediately.
-    state = GameListState(
-      query: query,
-      games: query.isEmpty ? store.readGames() : const [],
-      favorites: state.favorites,
-      cached: query.isEmpty,
-      updatedAt: query.isEmpty ? store.cachedAt : null,
-      loadingPopularity: state.loadingPopularity,
-      popularityError: state.popularityError,
-    );
-    _searchDebounce = Timer(
-      const Duration(milliseconds: 350),
-      () => unawaited(refresh()),
-    );
-  }
-
-  Future<GamePage> _fetch(int offset) => state.query.isEmpty
-      ? repository.fetchPage(offset)
-      : repository.searchPage(state.query, offset);
-
+  bool _refreshing = false;
+  DateTime? _catalogAt;
+  void setQuery(String value) => state = state.copyWith(query: value.trim());
   List<GameItem> _ranked(List<GameItem> games) => _popularity == null
       ? games
       : games
@@ -171,191 +129,119 @@ class GameListController extends StateNotifier<GameListState> {
             .toList();
 
   Future<void> loadPopularity() async {
-    if (state.loadingPopularity) return;
+    if (state.busy) return;
     state = state.copyWith(loadingPopularity: true, clearPopularityError: true);
     try {
       _popularity = await repository.fetchPopularity();
       if (!mounted) return;
-      if (state.query.isEmpty &&
-          _popularityEnabled &&
-          (_popularCheckedAt == null ||
-              DateTime.now().difference(_popularCheckedAt!) >
-                  const Duration(minutes: 5))) {
-        _popularGames = await repository.fetchPopularGames(_popularity!);
-        _popularCheckedAt = DateTime.now();
-        if (!mounted) return;
-      } else if (state.query.isEmpty &&
-          _popularityEnabled &&
-          _popularGames.isNotEmpty) {
-        _popularGames = await repository.refreshPrices(_popularGames);
-        if (!mounted) return;
-      }
       state = state.copyWith(
-        games: _ranked(
-          {
-            for (final g in state.games) g.id: g,
-            if (state.query.isEmpty && _popularityEnabled)
-              for (final g in _popularGames) g.id: g,
-          }.values.toList(),
-        ),
+        games: _ranked(state.games),
         favorites: {
           for (final g in _ranked(state.favorites.values.toList())) g.id: g,
         },
-        loadingPopularity: false,
       );
       await _saveCache();
     } on Object {
       if (mounted) {
         state = state.copyWith(
-          loadingPopularity: false,
           popularityError: '미국 공식 인기 목록을 불러오지 못했습니다. 저장된 순위를 우선 표시합니다.',
         );
       }
+    } finally {
+      if (mounted) state = state.copyWith(loadingPopularity: false);
     }
   }
 
-  @override
-  void dispose() {
-    _searchDebounce?.cancel();
-    super.dispose();
-  }
-
-  String _message(Object error) {
-    if (error is DioException) {
-      if (error.response?.statusCode == 403 ||
-          error.response?.statusCode == 429) {
-        return 'eShop이 요청을 제한했습니다. 잠시 후 다시 시도해 주세요.';
-      }
-      return 'eShop에 연결하지 못했습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.';
+  Future<void> refresh({bool force = true}) async {
+    if (_refreshing || state.loadingPopularity || state.savingFavorite) return;
+    final now = DateTime.now().toUtc();
+    if (!force &&
+        state.complete &&
+        state.updatedAt != null &&
+        now.difference(state.updatedAt!) >= Duration.zero &&
+        now.difference(state.updatedAt!) < cacheLifetime) {
+      state = state.copyWith(loading: false);
+      return;
     }
-    return 'eShop 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
-  }
-
-  Future<void> refresh() async {
-    _searchDebounce?.cancel();
-    final generation = ++_generation;
-    state = state.copyWith(loading: true, loadingMore: false, clearError: true);
+    _refreshing = true;
+    state = state.copyWith(
+      loading: true,
+      clearError: true,
+      progress: const CatalogProgress('전체 게임 목록 확인 중', 0, 0),
+    );
     try {
-      final page = await _fetch(0);
-      if (!mounted || generation != _generation) return;
-      if (_popularityEnabled && state.query.isEmpty) {
-        await loadPopularity();
-        if (!mounted || generation != _generation) return;
-      }
-      final now = DateTime.now().toUtc();
+      final catalogAt = _catalogAt ?? store.catalogFetchedAt;
+      final reuseMetadata =
+          !force &&
+          state.complete &&
+          catalogAt != null &&
+          now.difference(catalogAt) >= Duration.zero &&
+          now.difference(catalogAt) < const Duration(hours: 24);
+      final games = await repository.fetchCatalog(
+        metadata: reuseMetadata ? state.games : null,
+        onProgress: (progress) {
+          if (mounted) state = state.copyWith(progress: progress);
+        },
+      );
+      if (!mounted) return;
+      if (games.isEmpty) throw const FormatException('전체 목록이 비어 있습니다.');
+      _catalogAt = reuseMetadata ? catalogAt : DateTime.now().toUtc();
+      final previousRanks = {
+        for (final g in state.games) g.id: g.popularityRank,
+      };
+      final ranked = _popularity == null
+          ? games.map((g) => g.withPopularityRank(previousRanks[g.id])).toList()
+          : _ranked(games);
       state = state.copyWith(
-        games: _ranked(
-          {
-            if (state.query.isEmpty && _popularityEnabled)
-              for (final game in _popularGames) game.id: game,
-            for (final game in page.games) game.id: game,
-          }.values.toList(),
-        ),
-        total: page.total,
-        catalogFallback: page.catalogFallback,
-        nextOffset: page.nextOffset,
-        hasMore: page.nextOffset > 0 && page.nextOffset < page.total,
-        loading: false,
+        games: ranked,
+        complete: true,
         cached: false,
-        updatedAt: now,
+        updatedAt: DateTime.now().toUtc(),
       );
       await _saveCache();
-      unawaited(_localize(page.games, generation));
-      await _refreshFavorites(page.games, generation);
+      await _syncFavorites(ranked);
+      if (!mounted) return;
+      final ids = ranked.map((g) => g.id).toSet();
+      final absent = state.favorites.values
+          .where((g) => !ids.contains(g.id))
+          .toList();
+      if (absent.isNotEmpty) {
+        try {
+          await _syncFavorites(await repository.refreshPrices(absent));
+        } on Object {
+          if (mounted) {
+            state = state.copyWith(
+              error: '관심 게임 일부의 가격을 갱신하지 못했습니다. 마지막 조회 가격을 표시합니다.',
+            );
+          }
+        }
+      }
     } on Object catch (error) {
-      if (mounted && generation == _generation) {
+      if (mounted) {
         state = state.copyWith(
-          loading: false,
-          error: _message(error),
-          cached: state.query.isEmpty,
+          cached: true,
+          error: error is FormatException
+              ? error.message
+              : '전체 게임 정보를 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.',
         );
       }
-    }
-  }
-
-  Future<void> loadMore() async {
-    if (state.loading || state.loadingMore || !state.hasMore) return;
-    final generation = _generation;
-    final offset = state.nextOffset;
-    state = state.copyWith(loadingMore: true, clearError: true);
-    try {
-      final page = await _fetch(offset);
-      if (!mounted || generation != _generation) return;
-      state = state.copyWith(
-        games: _ranked(
-          {
-            for (final game in [...state.games, ...page.games]) game.id: game,
-          }.values.toList(),
-        ),
-        total: page.total,
-        nextOffset: page.nextOffset,
-        hasMore: page.nextOffset > offset && page.nextOffset < page.total,
-        loadingMore: false,
-      );
-      await _saveCache();
-      unawaited(_localize(page.games, generation));
-      await _syncFavorites(page.games);
-    } on Object catch (error) {
-      if (mounted && generation == _generation) {
-        state = state.copyWith(loadingMore: false, error: _message(error));
-      }
+    } finally {
+      _refreshing = false;
+      if (mounted) state = state.copyWith(loading: false);
     }
   }
 
   Future<void> _saveCache() async {
-    // Search results must never replace the offline discount list.
-    if (state.query.isNotEmpty) return;
+    if (!state.complete || state.updatedAt == null) return;
     try {
       await store.saveGames(
         state.games,
-        state.updatedAt ?? DateTime.now().toUtc(),
+        state.updatedAt!,
+        catalogAt: _catalogAt ?? store.catalogFetchedAt,
       );
     } on Object {
       if (mounted) {
         state = state.copyWith(storageError: '조회 결과를 기기에 저장하지 못했습니다.');
-      }
-    }
-  }
-
-  Future<void> _localize(List<GameItem> games, int generation) async {
-    try {
-      final localized = await repository.localize(games);
-      if (!mounted || generation != _generation) return;
-      final names = {for (final game in localized) game.id: game.name};
-      state = state.copyWith(
-        games: state.games
-            .map(
-              (game) => names.containsKey(game.id)
-                  ? game.withName(names[game.id]!)
-                  : game,
-            )
-            .toList(),
-      );
-      await _saveCache();
-      await _syncFavorites(
-        state.games.where((g) => names.containsKey(g.id)).toList(),
-      );
-    } on Object {
-      // Original storefront names remain usable if title enrichment fails.
-    }
-  }
-
-  Future<void> _refreshFavorites(List<GameItem> page, int generation) async {
-    final ids = page.map((g) => g.id).toSet();
-    final absent = state.favorites.values
-        .where((g) => !ids.contains(g.id))
-        .toList();
-    await _syncFavorites(page);
-    if (absent.isEmpty) return;
-    try {
-      final refreshed = await repository.refreshPrices(absent);
-      if (!mounted || generation != _generation) return;
-      await _syncFavorites(refreshed);
-    } on Object {
-      if (mounted && generation == _generation) {
-        state = state.copyWith(
-          error: '관심 게임 일부의 가격을 갱신하지 못했습니다. 마지막 조회 가격을 표시합니다.',
-        );
       }
     }
   }
@@ -392,7 +278,8 @@ class GameListController extends StateNotifier<GameListState> {
   }
 
   Future<void> toggleFavorite(GameItem game) async {
-    if (_favoriteWrites.contains(game.id)) return;
+    if (state.busy || _favoriteWrites.contains(game.id)) return;
+    state = state.copyWith(savingFavorite: true);
     _favoriteWrites.add(game.id);
     final remove = state.favorites.containsKey(game.id);
     try {
@@ -415,6 +302,7 @@ class GameListController extends StateNotifier<GameListState> {
       }
     } finally {
       _favoriteWrites.remove(game.id);
+      if (mounted) state = state.copyWith(savingFavorite: false);
     }
   }
 }
@@ -434,12 +322,12 @@ List<GameItem> filterAndSortGames(
     '시뮬레이션': ['시뮬레이션', 'simulation'],
     '스포츠': ['스포츠', 'sports'],
   };
-  final needle = query.trim().toLowerCase();
+  final needle = normalizeSearch(query);
   final filtered = source.where((game) {
     final matchesName =
         needle.isEmpty ||
-        game.name.toLowerCase().contains(needle) ||
-        game.originalName.toLowerCase().contains(needle);
+        normalizeSearch(game.name).contains(needle) ||
+        normalizeSearch(game.originalName).contains(needle);
     final keys = aliases[genre] ?? [genre.toLowerCase()];
     final matchesGenre =
         genre == '전체' ||
@@ -454,8 +342,7 @@ List<GameItem> filterAndSortGames(
       GameSort.popular => (a.popularityRank ?? 1 << 30).compareTo(
         b.popularityRank ?? 1 << 30,
       ),
-      GameSort.discount =>
-        b.discountRateAt(now).compareTo(a.discountRateAt(now)),
+      GameSort.discount => compareDiscount(a, b, now),
       GameSort.price => (a.priceAt(now) ?? 1 << 60).compareTo(
         b.priceAt(now) ?? 1 << 60,
       ),
@@ -465,10 +352,34 @@ List<GameItem> filterAndSortGames(
     };
     if (result != 0) return result;
     if (sort == GameSort.popular) {
-      final discount = b.discountRateAt(now).compareTo(a.discountRateAt(now));
+      final discount = compareDiscount(a, b, now);
       if (discount != 0) return discount;
     }
-    return a.name.compareTo(b.name);
+    final name = a.name.compareTo(b.name);
+    return name != 0 ? name : a.id.compareTo(b.id);
   });
   return filtered;
+}
+
+int compareDiscount(GameItem a, GameItem b, DateTime now) {
+  final ar = a.regularPrice ?? 0, br = b.regularPrice ?? 0;
+  final ad = a.saleActiveAt(now) && ar > 0 ? ar - a.discountPrice! : 0;
+  final bd = b.saleActiveAt(now) && br > 0 ? br - b.discountPrice! : 0;
+  return (bd * (ar > 0 ? ar : 1)).compareTo(ad * (br > 0 ? br : 1));
+}
+
+String normalizeSearch(String value) {
+  var text = value.toLowerCase().replaceAll('é', 'e');
+  const aliases = {
+    'persona': '페르소나',
+    'pokemon': '포켓몬',
+    'pokémon': '포켓몬',
+    'mario': '마리오',
+    'zelda': '젤다',
+    'animal crossing': '동물의숲',
+  };
+  for (final entry in aliases.entries) {
+    text = text.replaceAll(entry.key, entry.value);
+  }
+  return text.replaceAll(RegExp(r'[^a-z0-9가-힣]'), '');
 }

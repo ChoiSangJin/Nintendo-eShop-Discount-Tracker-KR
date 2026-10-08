@@ -6,26 +6,25 @@ import '../../domain/models/game_item.dart';
 import '../../domain/models/popularity_index.dart';
 import '../datasources/korean_title_resolver.dart';
 
-class GamePage {
-  const GamePage(
-    this.games,
-    this.total,
-    this.nextOffset, {
-    this.catalogFallback = false,
-  });
-  final List<GameItem> games;
+class CatalogProgress {
+  const CatalogProgress(this.label, this.completed, this.total);
+  final String label;
+  final int completed;
   final int total;
-  final int nextOffset;
-  final bool catalogFallback;
 }
 
+typedef ProgressCallback = void Function(CatalogProgress progress);
+
 abstract class GameRepository {
-  Future<GamePage> fetchPage(int offset);
-  Future<GamePage> searchPage(String query, int offset);
+  Future<List<GameItem>> fetchCatalog({
+    List<GameItem>? metadata,
+    ProgressCallback? onProgress,
+  });
   Future<PopularityIndex> fetchPopularity();
-  Future<List<GameItem>> fetchPopularGames(PopularityIndex popularity);
-  Future<List<GameItem>> refreshPrices(List<GameItem> games);
-  Future<List<GameItem>> localize(List<GameItem> games);
+  Future<List<GameItem>> refreshPrices(
+    List<GameItem> games, {
+    ProgressCallback? onProgress,
+  });
 }
 
 class NintendoGameRepository implements GameRepository {
@@ -34,42 +33,115 @@ class NintendoGameRepository implements GameRepository {
   final KoreanTitleResolver titles;
   static const pageSize = 30;
   static const catalogPageSize = 24;
-  bool _legacyUnavailable = false;
-
   @override
-  Future<GamePage> searchPage(String query, int offset) async {
-    // This endpoint searches the whole official KR catalog, including titles
-    // that are not on sale. Preserve its matches (e.g. Pokémon aliases).
-    final response = await dio.get<Map<String, dynamic>>(
-      'https://www.nintendo.com/kr/api/search',
-      queryParameters: {
-        'k': query.trim(),
-        'directory': 'software',
-        'size': catalogPageSize,
-        'p': offset ~/ catalogPageSize + 1,
-      },
-    );
-    final data = response.data;
-    if (data == null || data['items'] is! List || data['total'] is! num) {
-      throw const FormatException('한국 게임 검색 응답을 확인할 수 없습니다.');
+  Future<List<GameItem>> fetchCatalog({
+    List<GameItem>? metadata,
+    ProgressCallback? onProgress,
+  }) async {
+    if (metadata != null && metadata.isNotEmpty) {
+      return refreshPrices(metadata, onProgress: onProgress);
     }
-    final items = data['items'] as List;
-    final games = items
-        .whereType<Map>()
-        .where(
-          (item) =>
-              RegExp(r'^\d{14}$').hasMatch(item['nsuid']?.toString() ?? ''),
-        )
-        .map(
-          (item) => GameItem.fromKoreanCatalog(Map<String, dynamic>.from(item)),
-        )
-        .toList();
-    return GamePage(
-      await refreshPrices(games),
-      (data['total'] as num).toInt(),
-      offset + items.length,
-      catalogFallback: true,
-    );
+    Future<Map<String, dynamic>> page(num number, {bool oldest = false}) async {
+      final response = await dio.get<Map<String, dynamic>>(
+        'https://www.nintendo.com/kr/api/software',
+        queryParameters: {
+          'sftab': 'all',
+          'spage': number,
+          if (oldest) 'sfsort': 'adate',
+        },
+      );
+      final data = response.data;
+      if (data == null ||
+          data['items'] is! List ||
+          data['total'] is! int ||
+          (data['total'] as int) <= 0) {
+        throw const FormatException('한국 전체 카탈로그를 확인할 수 없습니다.');
+      }
+      return data;
+    }
+
+    final first = await page(1);
+    final total = first['total'] as int;
+    final pages = (total / catalogPageSize).ceil();
+    final records = <String, Map<String, dynamic>>{};
+    void accept(Map<String, dynamic> data, num number) {
+      final items = data['items'] as List;
+      final offset = ((number - 1) * catalogPageSize).round();
+      final expected = min(catalogPageSize, total - offset);
+      if (data['total'] != total || items.length != expected) {
+        throw const FormatException('전체 목록 확인 중 카탈로그가 변경되었습니다. 다시 시도해 주세요.');
+      }
+      for (final item in items) {
+        if (item is! Map ||
+            item['sys'] is! Map ||
+            item['sys']['id'] is! String) {
+          throw const FormatException('카탈로그 항목을 확인할 수 없습니다.');
+        }
+        records.putIfAbsent(
+          item['sys']['id'] as String,
+          () => Map<String, dynamic>.from(item),
+        );
+      }
+      onProgress?.call(CatalogProgress('전체 게임 목록 확인 중', records.length, total));
+    }
+
+    accept(first, 1);
+    Future<void> scan(
+      List<num> numbers, {
+      bool oldest = false,
+      bool finishEarly = true,
+    }) async {
+      for (var start = 0; start < numbers.length; start += 4) {
+        final batch = numbers.sublist(start, min(start + 4, numbers.length));
+        final results = await Future.wait(
+          batch.map((n) => page(n, oldest: oldest)),
+        );
+        for (var i = 0; i < results.length; i++) {
+          accept(results[i], batch[i]);
+        }
+        if (records.length == total && finishEarly) return;
+      }
+    }
+
+    await scan(List.generate(pages - 1, (i) => i + 2), finishEarly: false);
+    // Nintendo sorts only by release date. Equal-date records can move across
+    // offset boundaries even in an unchanged catalog. Scan the reverse order
+    // and overlapping windows until every distinct official record is present.
+    // Numeric page offsets are accepted by this API (0.5 page = 12 records).
+    if (records.length < total) {
+      await scan(List.generate(pages, (i) => i + 1), oldest: true);
+    }
+    for (final shift in [0.5, 0.25, 0.75]) {
+      if (records.length == total) break;
+      await scan(
+        List.generate(
+          ((total - 1) / catalogPageSize - shift).floor() + 1,
+          (i) => i + 1 + shift,
+        ),
+      );
+    }
+    if (records.length != total) {
+      throw const FormatException(
+        '전체 게임 목록을 확보하지 못했습니다. 저장된 목록을 표시합니다. 잠시 후 다시 시도해 주세요.',
+      );
+    }
+    final check = await page(1);
+    if (check['total'] != total ||
+        jsonEncode(check['items']) != jsonEncode(first['items'])) {
+      throw const FormatException('전체 목록 확인 중 카탈로그가 변경되었습니다. 다시 시도해 주세요.');
+    }
+    final games = <String, GameItem>{};
+    for (final record in records.values) {
+      final id = record['nsuid']?.toString() ?? '';
+      if (!RegExp(r'^\d{14}$').hasMatch(id)) continue;
+      final game = GameItem.fromKoreanCatalog(record);
+      games.putIfAbsent(
+        id,
+        () => game.withName(titles.cachedName(id, game.name)),
+      );
+    }
+    if (games.isEmpty) throw const FormatException('유효한 게임 목록이 없습니다.');
+    return refreshPrices(games.values.toList(), onProgress: onProgress);
   }
 
   @override
@@ -115,179 +187,47 @@ class NintendoGameRepository implements GameRepository {
   }
 
   @override
-  Future<List<GameItem>> fetchPopularGames(PopularityIndex popularity) async {
-    final metadata = <String, GameItem>{};
-    final seen = <String>{};
-    final entries = popularity.entries
-        .where((e) => seen.add(PopularityIndex.key(e.title, e.hardware)))
-        .toList();
-    // Only requested when the user selects popularity. Resolve the US list
-    // through KR's catalog, never use US prices or assume regional IDs match.
-    // Bound concurrency; price all resolved IDs in batches of at most 30.
-    for (var start = 0; start < entries.length; start += 4) {
-      final batch = entries.sublist(start, min(start + 4, entries.length));
-      final results = await Future.wait(
-        batch.map((entry) async {
-          final response = await dio.get<Map<String, dynamic>>(
-            'https://www.nintendo.com/kr/api/search',
-            queryParameters: {
-              'k': PopularityIndex.koreanSearchTerm(entry.title),
-              'directory': 'software',
-              'size': catalogPageSize,
-              'p': 1,
-            },
-          );
-          final items = response.data?['items'];
-          if (items is! List) {
-            throw const FormatException('한국 인기 게임 확인에 실패했습니다.');
-          }
-          return items
-              .whereType<Map>()
-              .where(
-                (item) => RegExp(
-                  r'^\d{14}$',
-                ).hasMatch(item['nsuid']?.toString() ?? ''),
-              )
-              .map(
-                (item) =>
-                    GameItem.fromKoreanCatalog(Map<String, dynamic>.from(item)),
-              )
-              .where(
-                (game) =>
-                    game.hardware == entry.hardware &&
-                    popularity.rankFor(game) != null,
-              )
-              .toList();
-        }),
-      );
-      for (final games in results) {
-        for (final game in games) {
-          metadata[game.id] = game;
-        }
-      }
-    }
-    final priced = await refreshPrices(metadata.values.toList());
-    return priced
-        .where((g) => g.saleActiveAt(DateTime.now().toUtc()))
-        .map((g) => g.withPopularityRank(popularity.rankFor(g)))
-        .toList();
-  }
-
-  @override
-  Future<GamePage> fetchPage(int offset) async {
-    if (_legacyUnavailable) return _fetchCatalogSales(offset);
-    try {
-      return await _fetchLegacySales(offset);
-    } on DioException catch (error) {
-      if (error.response?.statusCode != 404 &&
-          error.response?.statusCode != 410) {
-        rethrow;
-      }
-      _legacyUnavailable = true;
-      return _fetchCatalogSales(offset);
-    }
-  }
-
-  Future<GamePage> _fetchCatalogSales(int offset) async {
-    final sales = <String, GameItem>{};
-    var cursor = offset;
-    var total = offset + 1;
-    // The old eShop search API was retired. The public Korean catalog supplies
-    // official localized titles; the KR price service identifies actual sales.
-    // Bound each foreground call to four catalog pages. Preserve raw offsets,
-    // including invalid NSUIDs, so no games are silently skipped.
-    for (var round = 0; round < 4 && cursor < total; round++) {
-      final response = await dio.get<Map<String, dynamic>>(
-        'https://www.nintendo.com/kr/api/software',
-        queryParameters: {
-          'sftab': 'all',
-          'spage': cursor ~/ catalogPageSize + 1,
-        },
-      );
-      final data = response.data;
-      if (data == null || data['items'] is! List || data['total'] is! num) {
-        throw const FormatException('한국 공식 카탈로그 응답 형식을 확인할 수 없습니다.');
-      }
-      final items = data['items'] as List;
-      total = (data['total'] as num).toInt();
-      if (items.isEmpty) {
-        cursor = total;
-        break;
-      }
-      final games = items
-          .whereType<Map>()
-          .where(
-            (item) =>
-                RegExp(r'^\d{14}$').hasMatch(item['nsuid']?.toString() ?? ''),
-          )
-          .map(
-            (item) =>
-                GameItem.fromKoreanCatalog(Map<String, dynamic>.from(item)),
-          )
-          .toList();
-      final priced = await refreshPrices(games);
-      final now = DateTime.now().toUtc();
-      for (final game in priced) {
-        if (game.saleActiveAt(now)) sales[game.id] = game;
-      }
-      cursor += items.length;
-      if (sales.length >= pageSize) break;
-    }
-    return GamePage(
-      sales.values.toList(),
-      total,
-      cursor,
-      catalogFallback: true,
-    );
-  }
-
-  Future<GamePage> _fetchLegacySales(int offset) async {
-    final response = await dio.get<Map<String, dynamic>>(
-      'https://ec.nintendo.com/api/KR/ko/search/sales',
-      queryParameters: {'count': pageSize, 'offset': offset},
-    );
-    final data = response.data;
-    if (data == null || data['contents'] is! List || data['total'] is! num) {
-      throw const FormatException('한국 eShop 응답 형식을 확인할 수 없습니다.');
-    }
-    final contents = data['contents'] as List;
-    final games = <GameItem>[];
-    for (final item in contents) {
-      if (item is Map) {
-        final id = item['id']?.toString() ?? '';
-        if (RegExp(r'^\d{14}$').hasMatch(id)) {
-          games.add(GameItem.fromMetadata(Map<String, dynamic>.from(item)));
-        }
-      }
-    }
-    // Offset follows raw records, not filtered or deduplicated records.
-    final priced = await refreshPrices(games);
-    return GamePage(
-      priced,
-      (data['total'] as num).toInt(),
-      offset + contents.length,
-    );
-  }
-
-  @override
-  Future<List<GameItem>> refreshPrices(List<GameItem> games) async {
+  Future<List<GameItem>> refreshPrices(
+    List<GameItem> games, {
+    ProgressCallback? onProgress,
+  }) async {
     if (games.isEmpty) return [];
     final prices = <String, Map<String, dynamic>>{};
     final ids = games.map((game) => game.id).toSet().toList();
-    for (var i = 0; i < ids.length; i += pageSize) {
-      final batch = ids.sublist(i, min(i + pageSize, ids.length));
-      final response = await dio.get<Map<String, dynamic>>(
-        'https://api.ec.nintendo.com/v1/price',
-        queryParameters: {
-          'country': 'KR',
-          'lang': 'ko',
-          'ids': batch.join(','),
-        },
+    var completed = 0;
+    onProgress?.call(CatalogProgress('전체 게임 가격 확인 중', 0, ids.length));
+    for (var start = 0; start < ids.length; start += pageSize * 4) {
+      final batches = <List<String>>[];
+      for (
+        var i = start;
+        i < min(start + pageSize * 4, ids.length);
+        i += pageSize
+      ) {
+        batches.add(ids.sublist(i, min(i + pageSize, ids.length)));
+      }
+      final results = await Future.wait(
+        batches.map((batch) async {
+          final response = await dio.get<Map<String, dynamic>>(
+            'https://api.ec.nintendo.com/v1/price',
+            queryParameters: {
+              'country': 'KR',
+              'lang': 'ko',
+              'ids': batch.join(','),
+            },
+          );
+          final raw = response.data?['prices'];
+          if (raw is! List || raw.any((e) => e is! Map)) {
+            throw const FormatException('가격 응답 형식을 확인할 수 없습니다.');
+          }
+          completed += batch.length;
+          onProgress?.call(
+            CatalogProgress('전체 게임 가격 확인 중', completed, ids.length),
+          );
+          return raw;
+        }),
       );
-      final raw = response.data?['prices'];
-      if (raw is! List) throw const FormatException('가격 응답 형식을 확인할 수 없습니다.');
-      for (final entry in raw) {
-        if (entry is Map) {
+      for (final result in results) {
+        for (final entry in result.cast<Map>()) {
           prices[entry['title_id'].toString()] = Map<String, dynamic>.from(
             entry,
           );
@@ -296,24 +236,5 @@ class NintendoGameRepository implements GameRepository {
     }
     final now = DateTime.now().toUtc();
     return games.map((game) => game.withPrice(prices[game.id], now)).toList();
-  }
-
-  @override
-  Future<List<GameItem>> localize(List<GameItem> games) async {
-    final result = <GameItem>[];
-    // Price requests stay batched. Optional, cached storefront title lookups
-    // run separately with bounded concurrency, after the list is visible.
-    for (var i = 0; i < games.length; i += 4) {
-      final batch = games.sublist(i, min(i + 4, games.length));
-      result.addAll(
-        await Future.wait(
-          batch.map(
-            (game) async =>
-                game.withName(await titles.resolve(game.id, game.name)),
-          ),
-        ),
-      );
-    }
-    return result;
   }
 }

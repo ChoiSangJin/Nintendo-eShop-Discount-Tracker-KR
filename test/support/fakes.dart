@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:switch_sale_tracker/data/datasources/local_store.dart';
 import 'package:switch_sale_tracker/data/repositories/game_repository.dart';
 import 'package:switch_sale_tracker/domain/models/game_item.dart';
@@ -29,16 +30,26 @@ class MemoryStore implements LocalStore {
   final Map<String, String> titles = {};
   bool failWrites = false;
   @override
+  bool catalogComplete = false;
+  @override
   DateTime? cachedAt;
+  @override
+  DateTime? catalogFetchedAt;
   @override
   List<GameItem> readGames() => games;
   @override
   List<GameItem> readFavorites() => favorites.values.toList();
   @override
-  Future<void> saveGames(List<GameItem> games, DateTime at) async {
+  Future<void> saveGames(
+    List<GameItem> games,
+    DateTime at, {
+    DateTime? catalogAt,
+  }) async {
     if (failWrites) throw StateError('Storage full');
     this.games = games;
+    catalogComplete = true;
     cachedAt = at;
+    catalogFetchedAt = catalogAt ?? at;
   }
 
   @override
@@ -62,30 +73,24 @@ class MemoryStore implements LocalStore {
 }
 
 class FakeRepository implements GameRepository {
-  List<GamePage> pages = [
-    GamePage([exampleGame()], 1, 1),
-  ];
-  final List<int> offsets = [];
+  List<GameItem> games = [exampleGame()];
+  int catalogCalls = 0;
+  final metadataReuse = <bool>[];
   Object? failure;
   List<GameItem> refreshed = [];
-  List<GamePage> searchPages = [];
-  final List<String> queries = [];
   Map<String, int> popularity = {};
-  List<GameItem> popularGames = [];
+  Completer<List<GameItem>>? pending;
+  ProgressCallback? progress;
   @override
-  Future<List<GameItem>> fetchPopularGames(PopularityIndex popularity) async {
+  Future<List<GameItem>> fetchCatalog({
+    List<GameItem>? metadata,
+    ProgressCallback? onProgress,
+  }) async {
+    catalogCalls++;
+    metadataReuse.add(metadata != null);
+    progress = onProgress;
     if (failure != null) throw failure!;
-    return popularGames;
-  }
-
-  @override
-  Future<GamePage> searchPage(String query, int offset) async {
-    queries.add(query);
-    if (failure != null) throw failure!;
-    return searchPages.firstWhere(
-      (page) => page.nextOffset > offset,
-      orElse: () => const GamePage([], 0, 0),
-    );
+    return pending == null ? games : pending!.future;
   }
 
   @override
@@ -95,18 +100,12 @@ class FakeRepository implements GameRepository {
   }
 
   @override
-  Future<GamePage> fetchPage(int offset) async {
-    offsets.add(offset);
-    if (failure != null) throw failure!;
-    return pages.firstWhere(
-      (page) => page.nextOffset > offset,
-      orElse: () => const GamePage([], 0, 0),
-    );
-  }
-
-  @override
-  Future<List<GameItem>> refreshPrices(List<GameItem> games) async {
+  Future<List<GameItem>> refreshPrices(
+    List<GameItem> games, {
+    ProgressCallback? onProgress,
+  }) async {
     refreshed = games;
+    if (failure != null) throw failure!;
     return games
         .map(
           (g) => g.withPrice({
@@ -116,7 +115,4 @@ class FakeRepository implements GameRepository {
         )
         .toList();
   }
-
-  @override
-  Future<List<GameItem>> localize(List<GameItem> games) async => games;
 }
