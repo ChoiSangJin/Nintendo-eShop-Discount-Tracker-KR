@@ -5,6 +5,7 @@ import 'package:html/parser.dart' as html;
 import '../../domain/models/game_item.dart';
 import '../../domain/models/popularity_index.dart';
 import '../datasources/korean_title_resolver.dart';
+import '../datasources/catalog_products.dart';
 
 class CatalogProgress {
   const CatalogProgress(this.label, this.completed, this.total);
@@ -132,13 +133,13 @@ class NintendoGameRepository implements GameRepository {
     }
     final games = <String, GameItem>{};
     for (final record in records.values) {
-      final id = record['nsuid']?.toString() ?? '';
-      if (!RegExp(r'^\d{14}$').hasMatch(id)) continue;
-      final game = GameItem.fromKoreanCatalog(record);
-      games.putIfAbsent(
-        id,
-        () => game.withName(titles.cachedName(id, game.name)),
-      );
+      for (final product in expandCatalogRecord(record)) {
+        final game = GameItem.fromKoreanCatalog(product);
+        games.putIfAbsent(
+          game.id,
+          () => game.withName(titles.cachedName(game.id, game.name)),
+        );
+      }
     }
     if (games.isEmpty) throw const FormatException('유효한 게임 목록이 없습니다.');
     return refreshPrices(games.values.toList(), onProgress: onProgress);
@@ -193,7 +194,7 @@ class NintendoGameRepository implements GameRepository {
   }) async {
     if (games.isEmpty) return [];
     final prices = <String, Map<String, dynamic>>{};
-    final ids = games.map((game) => game.id).toSet().toList();
+    final ids = games.map((game) => game.id).where(isStoreId).toSet().toList();
     var completed = 0;
     onProgress?.call(CatalogProgress('전체 게임 가격 확인 중', 0, ids.length));
     for (var start = 0; start < ids.length; start += pageSize * 4) {

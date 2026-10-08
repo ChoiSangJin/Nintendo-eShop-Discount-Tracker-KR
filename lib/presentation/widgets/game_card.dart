@@ -279,28 +279,40 @@ Future<void> showGameDetails(
             Text('할인 마감  ${koreanDate(game.discountEnd!)} (한국 시간)'),
           if (game.priceCheckedAt != null)
             Text('가격 조회  ${koreanDate(game.priceCheckedAt!)} (한국 시간)'),
+          if (game.storeUrl == null) ...[
+            const SizedBox(height: 12),
+            const Text('스토어 정보가 확인되지 않아 가격을 표시할 수 없습니다.'),
+          ],
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
               icon: const Icon(Icons.open_in_new_rounded),
-              label: const Text('한국 공식 스토어에서 보기'),
-              onPressed: () async {
-                var opened = false;
-                try {
-                  opened = await launchUrl(
-                    Uri.parse('https://store.nintendo.co.kr/${game.id}'),
-                    mode: LaunchMode.externalApplication,
-                  );
-                } on Object {
-                  /* Surface a launch failure below. */
-                }
-                if (!opened && sheetContext.mounted) {
-                  ScaffoldMessenger.of(sheetContext).showSnackBar(
-                    const SnackBar(content: Text('브라우저를 열지 못했습니다.')),
-                  );
-                }
-              },
+              label: Text(
+                game.storeUrl != null
+                    ? '한국 공식 스토어에서 보기'
+                    : game.detailsUrl != null
+                    ? '공식 소개에서 보기'
+                    : '스토어 연결 정보 없음',
+              ),
+              onPressed: game.detailsUrl == null
+                  ? null
+                  : () async {
+                      var opened = false;
+                      try {
+                        opened = await launchUrl(
+                          Uri.parse(game.detailsUrl!),
+                          mode: LaunchMode.externalApplication,
+                        );
+                      } on Object {
+                        /* Surface a launch failure below. */
+                      }
+                      if (!opened && sheetContext.mounted) {
+                        ScaffoldMessenger.of(sheetContext).showSnackBar(
+                          const SnackBar(content: Text('브라우저를 열지 못했습니다.')),
+                        );
+                      }
+                    },
             ),
           ),
           const SizedBox(height: 12),

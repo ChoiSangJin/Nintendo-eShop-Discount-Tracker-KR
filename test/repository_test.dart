@@ -68,9 +68,9 @@ void main() {
         KoreanTitleResolver(dio, MemoryStore()),
       );
       final games = await repo.fetchCatalog(onProgress: progress.add);
-      expect(games, hasLength(119));
+      expect(games, hasLength(120));
       expect(games.any((g) => g.name == '공식 게임 24'), isTrue);
-      expect(games.map((g) => g.id).toSet(), hasLength(119));
+      expect(games.map((g) => g.id).toSet(), hasLength(120));
       expect(games.any((g) => g.priceAt(DateTime.now()) == null), isTrue);
       expect(catalogCalls, containsAll([1, 2, 3, 4, 5, 6]));
       expect(priceCounts, [30, 30, 30, 29]);

@@ -49,7 +49,8 @@ class HiveLocalStore implements LocalStore {
 
   @override
   List<GameItem> readGames() {
-    final snapshot = cache.get('catalog_snapshot_v2');
+    final snapshot =
+        cache.get('catalog_snapshot_v3') ?? cache.get('catalog_snapshot_v2');
     final value = snapshot is Map
         ? snapshot['games']
         : cache.get('games', defaultValue: <dynamic>[]);
@@ -60,7 +61,8 @@ class HiveLocalStore implements LocalStore {
   List<GameItem> readFavorites() => _decode(favorites.values);
   @override
   DateTime? get cachedAt {
-    final snapshot = cache.get('catalog_snapshot_v2');
+    final snapshot =
+        cache.get('catalog_snapshot_v3') ?? cache.get('catalog_snapshot_v2');
     return parseDate(
       snapshot is Map ? snapshot['updated_at'] : cache.get('updated_at'),
     );
@@ -68,13 +70,13 @@ class HiveLocalStore implements LocalStore {
 
   @override
   DateTime? get catalogFetchedAt {
-    final snapshot = cache.get('catalog_snapshot_v2');
+    final snapshot = cache.get('catalog_snapshot_v3');
     return snapshot is Map ? parseDate(snapshot['catalog_at']) : null;
   }
 
   @override
   bool get catalogComplete {
-    final snapshot = cache.get('catalog_snapshot_v2');
+    final snapshot = cache.get('catalog_snapshot_v3');
     if (snapshot is! Map || snapshot['games'] is! List || cachedAt == null) {
       return false;
     }
@@ -90,7 +92,7 @@ class HiveLocalStore implements LocalStore {
     List<GameItem> games,
     DateTime at, {
     DateTime? catalogAt,
-  }) => cache.put('catalog_snapshot_v2', {
+  }) => cache.put('catalog_snapshot_v3', {
     'games': games.map((g) => g.toJson()).toList(),
     'updated_at': at.toIso8601String(),
     'catalog_at': (catalogAt ?? at).toIso8601String(),
