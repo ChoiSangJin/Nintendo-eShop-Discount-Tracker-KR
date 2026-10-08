@@ -1,6 +1,9 @@
 import 'dart:math';
+import 'dart:convert';
 import 'package:dio/dio.dart';
+import 'package:html/parser.dart' as html;
 import '../../domain/models/game_item.dart';
+import '../../domain/models/popularity_index.dart';
 import '../datasources/korean_title_resolver.dart';
 
 class GamePage {
@@ -18,6 +21,8 @@ class GamePage {
 
 abstract class GameRepository {
   Future<GamePage> fetchPage(int offset);
+  Future<GamePage> searchPage(String query, int offset);
+  Future<PopularityIndex> fetchPopularity();
   Future<List<GameItem>> refreshPrices(List<GameItem> games);
   Future<List<GameItem>> localize(List<GameItem> games);
 }
@@ -29,6 +34,82 @@ class NintendoGameRepository implements GameRepository {
   static const pageSize = 30;
   static const catalogPageSize = 24;
   bool _legacyUnavailable = false;
+
+  @override
+  Future<GamePage> searchPage(String query, int offset) async {
+    // This endpoint searches the whole official KR catalog, including titles
+    // that are not on sale. Preserve its matches (e.g. Pokémon aliases).
+    final response = await dio.get<Map<String, dynamic>>(
+      'https://www.nintendo.com/kr/api/search',
+      queryParameters: {
+        'k': query.trim(),
+        'directory': 'software',
+        'size': catalogPageSize,
+        'p': offset ~/ catalogPageSize + 1,
+      },
+    );
+    final data = response.data;
+    if (data == null || data['items'] is! List || data['total'] is! num) {
+      throw const FormatException('한국 게임 검색 응답을 확인할 수 없습니다.');
+    }
+    final items = data['items'] as List;
+    final games = items
+        .whereType<Map>()
+        .where(
+          (item) =>
+              RegExp(r'^\d{14}$').hasMatch(item['nsuid']?.toString() ?? ''),
+        )
+        .map(
+          (item) => GameItem.fromKoreanCatalog(Map<String, dynamic>.from(item)),
+        )
+        .toList();
+    return GamePage(
+      await refreshPrices(games),
+      (data['total'] as num).toInt(),
+      offset + items.length,
+      catalogFallback: true,
+    );
+  }
+
+  @override
+  Future<PopularityIndex> fetchPopularity() async {
+    final response = await dio.get<String>(
+      'https://www.nintendo.com/us/store/games/best-sellers/',
+      options: Options(responseType: ResponseType.plain),
+    );
+    return parsePopularity(response.data ?? '');
+  }
+
+  static PopularityIndex parsePopularity(String body) {
+    final script = html.parse(body).querySelector('script#__NEXT_DATA__')?.text;
+    if (script == null) throw const FormatException('공식 인기 목록 형식이 바뀌었습니다.');
+    final data = jsonDecode(script) as Map<String, dynamic>;
+    final page = data['props']['pageProps']['page'];
+    if (page['slug'] != '/games/best-sellers/') {
+      throw const FormatException('공식 인기 목록을 확인할 수 없습니다.');
+    }
+    final items = page['content']['merchandisedGrid'] as List;
+    final ranks = <String, int>{};
+    final titles = <String, int>{};
+    for (var i = 0; i < items.length; i++) {
+      final id = (items[i] as Map)['nsuid']?.toString() ?? '';
+      if (RegExp(r'^\d{14}$').hasMatch(id)) {
+        ranks.putIfAbsent(id, () => i + 1);
+        final item = items[i] as Map;
+        final name = item['name'];
+        final hardware = item['platform'];
+        if (name is String &&
+            hardware is String &&
+            name.isNotEmpty &&
+            (hardware == 'Nintendo Switch' ||
+                hardware == 'Nintendo Switch 2')) {
+          titles.putIfAbsent(PopularityIndex.key(name, hardware), () => i + 1);
+        }
+      }
+    }
+    if (ranks.isEmpty) throw const FormatException('공식 인기 목록이 비어 있습니다.');
+    return PopularityIndex(ranks, byTitle: titles);
+  }
 
   @override
   Future<GamePage> fetchPage(int offset) async {

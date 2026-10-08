@@ -1,6 +1,7 @@
 import 'package:switch_sale_tracker/data/datasources/local_store.dart';
 import 'package:switch_sale_tracker/data/repositories/game_repository.dart';
 import 'package:switch_sale_tracker/domain/models/game_item.dart';
+import 'package:switch_sale_tracker/domain/models/popularity_index.dart';
 
 GameItem exampleGame({
   String id = '70010000000001',
@@ -67,6 +68,25 @@ class FakeRepository implements GameRepository {
   final List<int> offsets = [];
   Object? failure;
   List<GameItem> refreshed = [];
+  List<GamePage> searchPages = [];
+  final List<String> queries = [];
+  Map<String, int> popularity = {};
+  @override
+  Future<GamePage> searchPage(String query, int offset) async {
+    queries.add(query);
+    if (failure != null) throw failure!;
+    return searchPages.firstWhere(
+      (page) => page.nextOffset > offset,
+      orElse: () => const GamePage([], 0, 0),
+    );
+  }
+
+  @override
+  Future<PopularityIndex> fetchPopularity() async {
+    if (failure != null) throw failure!;
+    return PopularityIndex(popularity);
+  }
+
   @override
   Future<GamePage> fetchPage(int offset) async {
     offsets.add(offset);
