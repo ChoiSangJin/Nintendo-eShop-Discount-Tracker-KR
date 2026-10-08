@@ -6,6 +6,40 @@ import 'support/fakes.dart';
 
 void main() {
   test(
+    'popularity discovers older sales without leaking them into unrelated searches',
+    () async {
+      final repo = FakeRepository()
+        ..popularity = {'70010000000002': 1}
+        ..popularGames = [
+          exampleGame(id: '70010000000002', name: '인기 있는 오래된 게임'),
+        ]
+        ..searchPages = [
+          GamePage([exampleGame(name: '포켓몬스터', discount: null)], 1, 1),
+        ];
+      final store = MemoryStore();
+      final controller = GameListController(repo, store);
+      await controller.refresh();
+      controller.setPopularityEnabled(true);
+      await controller.loadPopularity();
+      expect(
+        controller.state.games.map((g) => g.name),
+        contains('인기 있는 오래된 게임'),
+      );
+      controller.setQuery('포켓몬');
+      await controller.refresh();
+      await controller.loadPopularity();
+      expect(controller.state.games.single.name, '포켓몬스터');
+      expect(store.games, hasLength(2));
+      controller.setQuery('');
+      await controller.refresh();
+      expect(
+        controller.state.games.map((g) => g.name),
+        contains('인기 있는 오래된 게임'),
+      );
+      controller.dispose();
+    },
+  );
+  test(
     'search includes full-price titles and cannot overwrite sales cache',
     () async {
       final store = MemoryStore();

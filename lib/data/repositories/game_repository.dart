@@ -23,6 +23,7 @@ abstract class GameRepository {
   Future<GamePage> fetchPage(int offset);
   Future<GamePage> searchPage(String query, int offset);
   Future<PopularityIndex> fetchPopularity();
+  Future<List<GameItem>> fetchPopularGames(PopularityIndex popularity);
   Future<List<GameItem>> refreshPrices(List<GameItem> games);
   Future<List<GameItem>> localize(List<GameItem> games);
 }
@@ -91,6 +92,7 @@ class NintendoGameRepository implements GameRepository {
     final items = page['content']['merchandisedGrid'] as List;
     final ranks = <String, int>{};
     final titles = <String, int>{};
+    final entries = <PopularityEntry>[];
     for (var i = 0; i < items.length; i++) {
       final id = (items[i] as Map)['nsuid']?.toString() ?? '';
       if (RegExp(r'^\d{14}$').hasMatch(id)) {
@@ -104,11 +106,71 @@ class NintendoGameRepository implements GameRepository {
             (hardware == 'Nintendo Switch' ||
                 hardware == 'Nintendo Switch 2')) {
           titles.putIfAbsent(PopularityIndex.key(name, hardware), () => i + 1);
+          entries.add(PopularityEntry(id, name, hardware, i + 1));
         }
       }
     }
     if (ranks.isEmpty) throw const FormatException('공식 인기 목록이 비어 있습니다.');
-    return PopularityIndex(ranks, byTitle: titles);
+    return PopularityIndex(ranks, byTitle: titles, entries: entries);
+  }
+
+  @override
+  Future<List<GameItem>> fetchPopularGames(PopularityIndex popularity) async {
+    final metadata = <String, GameItem>{};
+    final seen = <String>{};
+    final entries = popularity.entries
+        .where((e) => seen.add(PopularityIndex.key(e.title, e.hardware)))
+        .toList();
+    // Only requested when the user selects popularity. Resolve the US list
+    // through KR's catalog, never use US prices or assume regional IDs match.
+    // Bound concurrency; price all resolved IDs in batches of at most 30.
+    for (var start = 0; start < entries.length; start += 4) {
+      final batch = entries.sublist(start, min(start + 4, entries.length));
+      final results = await Future.wait(
+        batch.map((entry) async {
+          final response = await dio.get<Map<String, dynamic>>(
+            'https://www.nintendo.com/kr/api/search',
+            queryParameters: {
+              'k': PopularityIndex.koreanSearchTerm(entry.title),
+              'directory': 'software',
+              'size': catalogPageSize,
+              'p': 1,
+            },
+          );
+          final items = response.data?['items'];
+          if (items is! List) {
+            throw const FormatException('한국 인기 게임 확인에 실패했습니다.');
+          }
+          return items
+              .whereType<Map>()
+              .where(
+                (item) => RegExp(
+                  r'^\d{14}$',
+                ).hasMatch(item['nsuid']?.toString() ?? ''),
+              )
+              .map(
+                (item) =>
+                    GameItem.fromKoreanCatalog(Map<String, dynamic>.from(item)),
+              )
+              .where(
+                (game) =>
+                    game.hardware == entry.hardware &&
+                    popularity.rankFor(game) != null,
+              )
+              .toList();
+        }),
+      );
+      for (final games in results) {
+        for (final game in games) {
+          metadata[game.id] = game;
+        }
+      }
+    }
+    final priced = await refreshPrices(metadata.values.toList());
+    return priced
+        .where((g) => g.saleActiveAt(DateTime.now().toUtc()))
+        .map((g) => g.withPopularityRank(popularity.rankFor(g)))
+        .toList();
   }
 
   @override

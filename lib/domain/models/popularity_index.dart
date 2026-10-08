@@ -2,9 +2,14 @@ import 'game_item.dart';
 
 /// Positions in Nintendo's US Best Sellers list, not Korean sales figures.
 class PopularityIndex {
-  const PopularityIndex(this.byId, {this.byTitle = const {}});
+  const PopularityIndex(
+    this.byId, {
+    this.byTitle = const {},
+    this.entries = const [],
+  });
   final Map<String, int> byId;
   final Map<String, int> byTitle;
+  final List<PopularityEntry> entries;
 
   static String key(String title, String hardware) =>
       '${normalize(hardware)}:${normalize(title)}';
@@ -55,4 +60,23 @@ class PopularityIndex {
     }
     return null;
   }
+
+  static String koreanSearchTerm(String englishTitle) {
+    final normalized = normalize(englishTitle);
+    for (final alias in _officialAliases.entries) {
+      if (normalize(alias.value) == normalized) return alias.key;
+    }
+    return englishTitle
+        .replaceAll(RegExp(r'[™®©]'), '')
+        .replaceAll('\u00a0', ' ')
+        .trim();
+  }
+}
+
+class PopularityEntry {
+  const PopularityEntry(this.id, this.title, this.hardware, this.rank);
+  final String id;
+  final String title;
+  final String hardware;
+  final int rank;
 }

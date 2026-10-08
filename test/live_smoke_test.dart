@@ -74,6 +74,19 @@ void main() {
           'Live full-catalog Pokémon search: ${search.games.length} valid games, including regular-price titles; US official Best Sellers: ${ranks.byId.length} NSUID ranks, $matched verified KR title/platform matches.',
         );
         expect(matched, greaterThan(0));
+        final popular = await repository.fetchPopularGames(ranks);
+        expect(popular, isNotEmpty);
+        expect(
+          popular.every(
+            (g) =>
+                g.saleActiveAt(DateTime.now().toUtc()) &&
+                g.popularityRank != null,
+          ),
+          isTrue,
+        );
+        stdout.writeln(
+          'Live popular-first discovery: ${popular.length} discounted KR games resolved from the US official list.',
+        );
       } finally {
         dio.close(force: true);
         HttpOverrides.global = null;

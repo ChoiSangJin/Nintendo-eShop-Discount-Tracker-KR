@@ -134,6 +134,11 @@ class GameListController extends StateNotifier<GameListState> {
   final Set<String> _favoriteWrites = {};
   Timer? _searchDebounce;
   PopularityIndex? _popularity;
+  List<GameItem> _popularGames = [];
+  bool _popularityEnabled = false;
+  DateTime? _popularCheckedAt;
+
+  void setPopularityEnabled(bool enabled) => _popularityEnabled = enabled;
 
   void setQuery(String value) {
     final query = value.trim();
@@ -171,8 +176,28 @@ class GameListController extends StateNotifier<GameListState> {
     try {
       _popularity = await repository.fetchPopularity();
       if (!mounted) return;
+      if (state.query.isEmpty &&
+          _popularityEnabled &&
+          (_popularCheckedAt == null ||
+              DateTime.now().difference(_popularCheckedAt!) >
+                  const Duration(minutes: 5))) {
+        _popularGames = await repository.fetchPopularGames(_popularity!);
+        _popularCheckedAt = DateTime.now();
+        if (!mounted) return;
+      } else if (state.query.isEmpty &&
+          _popularityEnabled &&
+          _popularGames.isNotEmpty) {
+        _popularGames = await repository.refreshPrices(_popularGames);
+        if (!mounted) return;
+      }
       state = state.copyWith(
-        games: _ranked(state.games),
+        games: _ranked(
+          {
+            for (final g in state.games) g.id: g,
+            if (state.query.isEmpty && _popularityEnabled)
+              for (final g in _popularGames) g.id: g,
+          }.values.toList(),
+        ),
         favorites: {
           for (final g in _ranked(state.favorites.values.toList())) g.id: g,
         },
@@ -213,10 +238,18 @@ class GameListController extends StateNotifier<GameListState> {
     try {
       final page = await _fetch(0);
       if (!mounted || generation != _generation) return;
+      if (_popularityEnabled && state.query.isEmpty) {
+        await loadPopularity();
+        if (!mounted || generation != _generation) return;
+      }
       final now = DateTime.now().toUtc();
       state = state.copyWith(
         games: _ranked(
-          {for (final game in page.games) game.id: game}.values.toList(),
+          {
+            if (state.query.isEmpty && _popularityEnabled)
+              for (final game in _popularGames) game.id: game,
+            for (final game in page.games) game.id: game,
+          }.values.toList(),
         ),
         total: page.total,
         catalogFallback: page.catalogFallback,

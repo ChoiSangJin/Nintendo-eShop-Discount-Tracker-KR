@@ -71,6 +71,13 @@ class FakeRepository implements GameRepository {
   List<GamePage> searchPages = [];
   final List<String> queries = [];
   Map<String, int> popularity = {};
+  List<GameItem> popularGames = [];
+  @override
+  Future<List<GameItem>> fetchPopularGames(PopularityIndex popularity) async {
+    if (failure != null) throw failure!;
+    return popularGames;
+  }
+
   @override
   Future<GamePage> searchPage(String query, int offset) async {
     queries.add(query);

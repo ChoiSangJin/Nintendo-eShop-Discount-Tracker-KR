@@ -3,9 +3,82 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:switch_sale_tracker/data/datasources/korean_title_resolver.dart';
 import 'package:switch_sale_tracker/data/repositories/game_repository.dart';
+import 'package:switch_sale_tracker/domain/models/popularity_index.dart';
 import 'support/fakes.dart';
 
 void main() {
+  test(
+    'popular discovery resolves regional IDs and only prices confirmed KR titles',
+    () async {
+      final dio = Dio();
+      final popularity = PopularityIndex(
+        {'70010000000999': 1},
+        byTitle: {PopularityIndex.key('Hogwarts Legacy', 'Nintendo Switch'): 1},
+        entries: [
+          const PopularityEntry(
+            '70010000000999',
+            'Hogwarts Legacy',
+            'Nintendo Switch',
+            1,
+          ),
+        ],
+      );
+      dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            final search = options.uri.path == '/kr/api/search';
+            if (!search) {
+              expect(options.queryParameters['ids'], '70010000000001');
+              expect(options.queryParameters['country'], 'KR');
+            }
+            handler.resolve(
+              Response(
+                requestOptions: options,
+                data: search
+                    ? {
+                        'items': [
+                          {
+                            'nsuid': '70010000000001',
+                            'title': '호그와트 레거시 (Hogwarts Legacy)',
+                            'hardwareCategory': 'Nintendo Switch',
+                          },
+                          {
+                            'nsuid': '70010000000002',
+                            'title': 'Hogwarts Legacy Deluxe Edition',
+                            'hardwareCategory': 'Nintendo Switch',
+                          },
+                          {
+                            'nsuid': '70010000000003',
+                            'title': 'Hogwarts Legacy',
+                            'hardwareCategory': 'Nintendo Switch 2',
+                          },
+                        ],
+                      }
+                    : {
+                        'prices': [
+                          {
+                            'title_id': '70010000000001',
+                            'regular_price': {'raw_value': '50000'},
+                            'discount_price': {'raw_value': '10000'},
+                          },
+                        ],
+                      },
+              ),
+            );
+          },
+        ),
+      );
+      final repo = NintendoGameRepository(
+        dio,
+        KoreanTitleResolver(dio, MemoryStore()),
+      );
+      final games = await repo.fetchPopularGames(popularity);
+      expect(games.single.id, '70010000000001');
+      expect(games.single.popularityRank, 1);
+      expect(games.single.name, '호그와트 레거시 (Hogwarts Legacy)');
+      expect(games.single.saleActiveAt(DateTime.now()), isTrue);
+    },
+  );
   test(
     'full-catalog search retains regular-price games and raw pagination',
     () async {

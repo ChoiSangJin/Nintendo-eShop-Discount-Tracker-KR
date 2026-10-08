@@ -152,6 +152,13 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<GameListState>(gameListProvider, (previous, next) {
+      if (previous?.loadingPopularity == true &&
+          !next.loadingPopularity &&
+          _sort == GameSort.popular) {
+        setState(_resetPage);
+      }
+    });
     final state = ref.watch(gameListProvider);
     final controller = ref.read(gameListProvider.notifier);
     final now = DateTime.now().toUtc();
@@ -364,14 +371,10 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                   _resetPage();
                                 });
                                 if (value == GameSort.popular) {
-                                  unawaited(
-                                    controller.loadPopularity().then((_) {
-                                      if (mounted &&
-                                          _sort == GameSort.popular) {
-                                        setState(_resetPage);
-                                      }
-                                    }),
-                                  );
+                                  controller.setPopularityEnabled(true);
+                                  unawaited(controller.loadPopularity());
+                                } else {
+                                  controller.setPopularityEnabled(false);
                                 }
                               }
                             },
@@ -396,7 +399,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                     SliverToBoxAdapter(
                       child: _notice(
                         state.loadingPopularity
-                            ? '미국 공식 인기 목록을 확인하는 중이에요'
+                            ? '미국 인기 게임의 한국 판매·가격을 확인하는 중이에요'
                             : state.popularityError ??
                                   '미국 공식 Best Sellers 기준 · 순위가 확인된 게임 우선',
                         icon: Icons.trending_up_rounded,
