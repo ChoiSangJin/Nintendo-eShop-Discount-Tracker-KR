@@ -52,6 +52,41 @@ void main() {
             '${game.id} | ${game.name} | ${game.regularPrice} -> ${game.discountPrice} KRW',
           );
         }
+        final search = await repository.searchPage('포켓몬', 0);
+        expect(search.games, isNotEmpty);
+        expect(
+          search.games.any(
+            (g) =>
+                g.regularPrice != null &&
+                !g.saleActiveAt(DateTime.now().toUtc()),
+          ),
+          isTrue,
+        );
+        expect(search.games.any((g) => hasHangul(g.name)), isTrue);
+        final ranks = await repository.fetchPopularity();
+        expect(ranks.byId, isNotEmpty);
+        expect(ranks.byId.values.every((rank) => rank > 0), isTrue);
+        final matched = [
+          ...page.games,
+          ...search.games,
+        ].where((g) => ranks.rankFor(g) != null).length;
+        stdout.writeln(
+          'Live full-catalog Pokémon search: ${search.games.length} valid games, including regular-price titles; US official Best Sellers: ${ranks.byId.length} NSUID ranks, $matched verified KR title/platform matches.',
+        );
+        expect(matched, greaterThan(0));
+        final popular = await repository.fetchPopularGames(ranks);
+        expect(popular, isNotEmpty);
+        expect(
+          popular.every(
+            (g) =>
+                g.saleActiveAt(DateTime.now().toUtc()) &&
+                g.popularityRank != null,
+          ),
+          isTrue,
+        );
+        stdout.writeln(
+          'Live popular-first discovery: ${popular.length} discounted KR games resolved from the US official list.',
+        );
       } finally {
         dio.close(force: true);
         HttpOverrides.global = null;

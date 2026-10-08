@@ -28,6 +28,7 @@ class GameItem {
     this.discountEnd,
     this.priceCheckedAt,
     this.hardware = 'Nintendo Switch',
+    this.popularityRank,
   });
 
   final String id;
@@ -42,6 +43,7 @@ class GameItem {
   final DateTime? discountEnd;
   final DateTime? priceCheckedAt;
   final String hardware;
+  final int? popularityRank;
 
   static int calculateDiscountRate(int? regular, int? discount) {
     if (regular == null ||
@@ -79,7 +81,11 @@ class GameItem {
     discountEnd: discountEnd,
     priceCheckedAt: priceCheckedAt,
     hardware: hardware,
+    popularityRank: popularityRank,
   );
+
+  GameItem withPopularityRank(int? rank) =>
+      GameItem.fromJson({...toJson(), 'popularityRank': rank});
 
   GameItem withPrice(Map<String, dynamic>? json, DateTime checkedAt) {
     final regular = json?['regular_price'];
@@ -103,6 +109,7 @@ class GameItem {
       discountEnd: discount is Map ? parseDate(discount['end_datetime']) : null,
       priceCheckedAt: json == null ? null : checkedAt,
       hardware: hardware,
+      popularityRank: popularityRank,
     );
   }
 
@@ -164,6 +171,7 @@ class GameItem {
     'discountEnd': discountEnd?.toIso8601String(),
     'priceCheckedAt': priceCheckedAt?.toIso8601String(),
     'hardware': hardware,
+    'popularityRank': popularityRank,
   };
 
   factory GameItem.fromJson(Map<String, dynamic> json) => GameItem(
@@ -179,5 +187,6 @@ class GameItem {
     discountEnd: parseDate(json['discountEnd']),
     priceCheckedAt: parseDate(json['priceCheckedAt']),
     hardware: json['hardware']?.toString() ?? 'Nintendo Switch',
+    popularityRank: (json['popularityRank'] as num?)?.toInt(),
   );
 }

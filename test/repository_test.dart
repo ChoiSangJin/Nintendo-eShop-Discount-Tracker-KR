@@ -1,10 +1,167 @@
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:switch_sale_tracker/data/datasources/korean_title_resolver.dart';
 import 'package:switch_sale_tracker/data/repositories/game_repository.dart';
+import 'package:switch_sale_tracker/domain/models/popularity_index.dart';
 import 'support/fakes.dart';
 
 void main() {
+  test(
+    'popular discovery resolves regional IDs and only prices confirmed KR titles',
+    () async {
+      final dio = Dio();
+      final popularity = PopularityIndex(
+        {'70010000000999': 1},
+        byTitle: {PopularityIndex.key('Hogwarts Legacy', 'Nintendo Switch'): 1},
+        entries: [
+          const PopularityEntry(
+            '70010000000999',
+            'Hogwarts Legacy',
+            'Nintendo Switch',
+            1,
+          ),
+        ],
+      );
+      dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            final search = options.uri.path == '/kr/api/search';
+            if (!search) {
+              expect(options.queryParameters['ids'], '70010000000001');
+              expect(options.queryParameters['country'], 'KR');
+            }
+            handler.resolve(
+              Response(
+                requestOptions: options,
+                data: search
+                    ? {
+                        'items': [
+                          {
+                            'nsuid': '70010000000001',
+                            'title': '호그와트 레거시 (Hogwarts Legacy)',
+                            'hardwareCategory': 'Nintendo Switch',
+                          },
+                          {
+                            'nsuid': '70010000000002',
+                            'title': 'Hogwarts Legacy Deluxe Edition',
+                            'hardwareCategory': 'Nintendo Switch',
+                          },
+                          {
+                            'nsuid': '70010000000003',
+                            'title': 'Hogwarts Legacy',
+                            'hardwareCategory': 'Nintendo Switch 2',
+                          },
+                        ],
+                      }
+                    : {
+                        'prices': [
+                          {
+                            'title_id': '70010000000001',
+                            'regular_price': {'raw_value': '50000'},
+                            'discount_price': {'raw_value': '10000'},
+                          },
+                        ],
+                      },
+              ),
+            );
+          },
+        ),
+      );
+      final repo = NintendoGameRepository(
+        dio,
+        KoreanTitleResolver(dio, MemoryStore()),
+      );
+      final games = await repo.fetchPopularGames(popularity);
+      expect(games.single.id, '70010000000001');
+      expect(games.single.popularityRank, 1);
+      expect(games.single.name, '호그와트 레거시 (Hogwarts Legacy)');
+      expect(games.single.saleActiveAt(DateTime.now()), isTrue);
+    },
+  );
+  test(
+    'full-catalog search retains regular-price games and raw pagination',
+    () async {
+      final dio = Dio();
+      dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            final search = options.uri.path == '/kr/api/search';
+            if (search) {
+              expect(options.queryParameters['k'], '포켓몬');
+              expect(options.queryParameters['directory'], 'software');
+              expect(options.queryParameters['p'], 2);
+            }
+            handler.resolve(
+              Response(
+                requestOptions: options,
+                data: search
+                    ? {
+                        'total': 100,
+                        'items': [
+                          {'nsuid': '70010000000001', 'title': '포켓몬스터'},
+                          {'nsuid': '0000', 'title': '예정 게임'},
+                        ],
+                      }
+                    : {
+                        'prices': [
+                          {
+                            'title_id': '70010000000001',
+                            'regular_price': {'raw_value': '64800'},
+                          },
+                        ],
+                      },
+              ),
+            );
+          },
+        ),
+      );
+      final repo = NintendoGameRepository(
+        dio,
+        KoreanTitleResolver(dio, MemoryStore()),
+      );
+      final page = await repo.searchPage('포켓몬', 24);
+      expect(page.nextOffset, 26);
+      expect(page.total, 100);
+      expect(page.games.single.name, '포켓몬스터');
+      expect(page.games.single.priceAt(DateTime.now()), 64800);
+      expect(page.games.single.saleActiveAt(DateTime.now()), isFalse);
+    },
+  );
+  test(
+    'only the official best-seller grid supplies ranks, duplicates keep first rank',
+    () {
+      final data = {
+        'props': {
+          'pageProps': {
+            'page': {
+              'slug': '/games/best-sellers/',
+              'content': {
+                'merchandisedGrid': [
+                  {'nsuid': '70010000000001', 'name': '인기 게임'},
+                  {'nsuid': null},
+                  {'nsuid': '70010000000002', 'name': '또 다른 게임'},
+                  {'nsuid': '70010000000001'},
+                ],
+              },
+            },
+          },
+        },
+      };
+      final body =
+          '<script id="__NEXT_DATA__" type="application/json">${jsonEncode(data)}</script>';
+      expect(NintendoGameRepository.parsePopularity(body).byId, {
+        '70010000000001': 1,
+        '70010000000002': 3,
+      });
+      expect(
+        () => NintendoGameRepository.parsePopularity(
+          body.replaceAll('/games/best-sellers/', '/games/'),
+        ),
+        throwsFormatException,
+      );
+    },
+  );
   test(
     'retired sales API falls back to official Korean titles and real discounts',
     () async {
