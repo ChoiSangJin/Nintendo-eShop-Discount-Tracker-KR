@@ -10,6 +10,85 @@ import 'support/fakes.dart';
 
 void main() {
   testWidgets(
+    'price exclusion precedes sorting/paging but preserves full search and favorites',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 1100);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repository = FakeRepository()
+        ..games = [
+          for (var i = 0; i < 21; i++)
+            exampleGame(
+              id: '${70010000000000 + i}',
+              name: '표시 게임 $i',
+              regular: 10000,
+              discount: 5000 + i,
+            ),
+          for (final price in [1000, 3000, 4999])
+            exampleGame(
+              id: '${70010000001000 + price}',
+              name: '제외 게임 $price',
+              regular: 10000,
+              discount: price,
+            ),
+          exampleGame(id: '70010000009000', name: '경계 999', discount: 999),
+          exampleGame(id: '70010000009001', name: '무료 게임', discount: 0),
+          exampleGame(
+            id: '70010000009002',
+            name: '정가 게임',
+            regular: 3000,
+            discount: null,
+          ),
+        ];
+      final store = MemoryStore();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            localStoreProvider.overrideWithValue(store),
+            gameRepositoryProvider.overrideWithValue(repository),
+          ],
+          child: const TrackerApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('한국 공식 할인 게임 23개 발견'), findsOneWidget);
+      expect(find.text('판매가 1,000~4,999원 게임 제외'), findsOneWidget);
+      expect(find.text('20개 표시 · 1페이지'), findsOneWidget);
+      expect(
+        tester.widget<GameCard>(find.byType(GameCard).first).game.name,
+        '무료 게임',
+      );
+      expect(find.text('제외 게임 1000'), findsNothing);
+      expect(store.games, hasLength(27));
+      await tester.tap(find.text('다음').first);
+      await tester.pumpAndSettle();
+      expect(find.text('3개 표시 · 2페이지'), findsOneWidget);
+      expect(repository.catalogCalls, 1);
+      await tester.tap(find.byType(DropdownButton<GameSort>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('최저 가격순').last);
+      await tester.pumpAndSettle();
+      expect(find.text('20개 표시 · 1페이지'), findsOneWidget);
+      expect(find.text('한국 공식 할인 게임 23개 발견'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), '제외 게임');
+      await tester.pumpAndSettle();
+      expect(find.text('3개 표시 · 1페이지'), findsOneWidget);
+      expect(find.text('제외 게임 1000'), findsOneWidget);
+      expect(find.text('판매가 1,000~4,999원 게임 제외'), findsNothing);
+      await tester.tap(find.byTooltip('관심 게임에 추가').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('관심 게임'));
+      await tester.pumpAndSettle();
+      expect(find.text('제외 게임 1000'), findsOneWidget);
+      expect(store.readFavorites().single.discountPrice, 1000);
+      expect(store.games, hasLength(27));
+      expect(repository.catalogCalls, 1);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
     '20-item pages are globally sorted and navigating makes no requests',
     (tester) async {
       tester.view.physicalSize = const Size(430, 1100);
@@ -127,7 +206,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final repository = FakeRepository()
       ..games = [
-        exampleGame(id: '70010000000001', name: '높은 할인', discount: 1000),
+        exampleGame(id: '70010000000001', name: '높은 할인', discount: 6000),
         exampleGame(id: '70010000000002', name: '높은 인기', discount: 25000),
       ]
       ..popularity = {'70010000000002': 1};
