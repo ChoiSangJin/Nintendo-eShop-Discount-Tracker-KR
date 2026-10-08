@@ -1,3 +1,10 @@
+## 다운로드
+
+- [서명된 ARM64 APK 다운로드](https://raw.githubusercontent.com/ChoiSangJin/Nintendo-eShop-Discount-Tracker-KR/2e67c33e07f5809d906b73ad98e12b3f11f1e36a/distribution/switch-sale-tracker-kr-arm64-v1.0.0.apk) — 19.8 MB (18.90 MiB), Android 7.0 이상
+- [SHA-256 체크섬](https://raw.githubusercontent.com/ChoiSangJin/Nintendo-eShop-Discount-Tracker-KR/2e67c33e07f5809d906b73ad98e12b3f11f1e36a/distribution/switch-sale-tracker-kr-arm64-v1.0.0.apk.sha256)
+
+GitHub Release 첨부 업로드는 이 환경의 인증 오류로 완료되지 않아, 배포 커밋에 고정된 APK를 직접 제공합니다. 외부 다운로드 파일의 체크섬과 ARM64 구성을 검증했습니다.
+
 한국 Nintendo eShop 할인 게임을 탐색하고 찜하는 Android 앱의 첫 릴리스입니다.
 
 - 한국 공식 카탈로그의 한국 정식 게임명을 우선 표시
