@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../domain/models/game_item.dart';
+import '../controllers/game_list_controller.dart';
 import 'game_platform_badge.dart';
 
 String won(int? amount) =>
@@ -165,7 +166,7 @@ class GameCard extends StatelessWidget {
                     ],
                     if (game.priceCheckedAt != null &&
                         now.difference(game.priceCheckedAt!) >
-                            const Duration(minutes: 15)) ...[
+                            GameListController.cacheLifetime) ...[
                       const SizedBox(height: 6),
                       Text(
                         '마지막 조회 가격 · ${koreanDate(game.priceCheckedAt!)}',

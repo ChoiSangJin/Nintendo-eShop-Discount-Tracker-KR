@@ -11,6 +11,32 @@ import 'package:switch_sale_tracker/presentation/widgets/game_platform_badge.dar
 import 'support/fakes.dart';
 
 void main() {
+  testWidgets('price age notice uses the 12-hour automatic refresh interval', (
+    tester,
+  ) async {
+    final checkedAt = DateTime.utc(2026, 10, 12);
+    final game = exampleGame().withPrice({
+      'regular_price': {'raw_value': '50000'},
+    }, checkedAt);
+    Future<void> showAt(Duration age) => tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: GameCard(
+              game: game,
+              favorite: false,
+              onFavorite: () {},
+              now: checkedAt.add(age),
+            ),
+          ),
+        ),
+      ),
+    );
+    await showAt(const Duration(hours: 11, minutes: 59));
+    expect(find.textContaining('마지막 조회 가격'), findsNothing);
+    await showAt(const Duration(hours: 12, minutes: 1));
+    expect(find.textContaining('마지막 조회 가격'), findsOneWidget);
+  });
   testWidgets(
     'discount/platform selection composes before paging and resets cleanly',
     (tester) async {

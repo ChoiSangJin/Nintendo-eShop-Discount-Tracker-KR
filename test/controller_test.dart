@@ -50,13 +50,43 @@ void main() {
     },
   );
   test(
+    'automatic refresh reuses a complete snapshot within 12 hours after restart',
+    () async {
+      for (final age in [
+        const Duration(minutes: 20),
+        const Duration(hours: 11, minutes: 59),
+      ]) {
+        final store = MemoryStore();
+        final fetchedAt = DateTime.now().toUtc().subtract(age);
+        final game = exampleGame(name: '저장된 게임');
+        await store.saveGames([game], fetchedAt);
+        final repo = FakeRepository()..failure = StateError('offline');
+        final controller = GameListController(repo, store);
+        await controller.refresh(force: false);
+        expect(repo.catalogCalls, 0);
+        expect(controller.state.loading, isFalse);
+        expect(controller.state.error, isNull);
+        expect(controller.state.games.single.name, '저장된 게임');
+        expect(controller.state.updatedAt, fetchedAt);
+        expect(store.cachedAt, fetchedAt);
+        controller.dispose();
+
+        final restored = GameListController(repo, store);
+        await restored.refresh(force: false);
+        expect(repo.catalogCalls, 0);
+        expect(restored.state.games.single.name, '저장된 게임');
+        restored.dispose();
+      }
+    },
+  );
+  test(
     'automatic expired-price refresh reuses only recent complete metadata',
     () async {
       final store = MemoryStore();
       await store.saveGames(
         [exampleGame()],
-        DateTime.now().subtract(const Duration(minutes: 20)),
-        catalogAt: DateTime.now().subtract(const Duration(hours: 2)),
+        DateTime.now().subtract(const Duration(hours: 12)),
+        catalogAt: DateTime.now().subtract(const Duration(hours: 13)),
       );
       final repo = FakeRepository();
       final controller = GameListController(repo, store);
