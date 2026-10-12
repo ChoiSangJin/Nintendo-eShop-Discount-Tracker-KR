@@ -116,7 +116,7 @@ class GameListController extends StateNotifier<GameListState> {
       );
   final GameRepository repository;
   final LocalStore store;
-  static const cacheLifetime = Duration(minutes: 15);
+  static const cacheLifetime = Duration(hours: 12);
   final Set<String> _favoriteWrites = {};
   PopularityIndex? _popularity;
   bool _refreshing = false;
