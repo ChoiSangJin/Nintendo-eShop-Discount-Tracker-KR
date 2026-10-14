@@ -5,6 +5,7 @@ import '../../domain/models/game_item.dart';
 import '../controllers/game_list_controller.dart';
 import '../widgets/game_card.dart';
 import '../widgets/game_filters.dart';
+import '../widgets/page_navigation.dart';
 
 class MainScreen extends ConsumerStatefulWidget {
   const MainScreen({super.key});
@@ -140,7 +141,9 @@ class _MainScreenState extends ConsumerState<MainScreen>
         : _page.clamp(0, (allGames.length - 1) ~/ _pageSize);
     _page = page;
     final games = allGames.skip(page * _pageSize).take(_pageSize).toList();
-    final canNext = !state.busy && allGames.length > (page + 1) * _pageSize;
+    final pageCount = allGames.isEmpty
+        ? 1
+        : (allGames.length / _pageSize).ceil();
     return PopScope(
       canPop: !state.busy,
       child: Stack(
@@ -178,7 +181,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                       onPressed: () => showAboutDialog(
                         context: context,
                         applicationName: 'Switch 할인 트래커 KR',
-                        applicationVersion: '1.3.2',
+                        applicationVersion: '1.3.4',
                         applicationIcon: const Icon(
                           Icons.sports_esports_rounded,
                           color: Color(0xffe60012),
@@ -266,10 +269,10 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                     const SizedBox(height: 10),
                                     Text(
                                       wishlist
-                                          ? '${state.favorites.length}개의 관심 게임을 모아봤어요.'
+                                          ? '관심 있는 게임을 모아봤어요.'
                                           : _query.trim().isNotEmpty
                                           ? '전체 게임 검색 · 할인하지 않는 게임도 표시해요'
-                                          : '한국 공식 할인 게임 ${allGames.length}개 발견',
+                                          : '한국 공식 할인 게임을 모아봤어요.',
                                       style: const TextStyle(
                                         color: Color(0xff747680),
                                         fontSize: 13,
@@ -378,7 +381,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                   spacing: 16,
                                   children: [
                                     Text(
-                                      '${games.length}개 표시 · ${page + 1}페이지',
+                                      '총 ${allGames.length}개 · ${games.length}개 표시 · ${page + 1}페이지',
                                       style: const TextStyle(
                                         fontWeight: FontWeight.w700,
                                       ),
@@ -418,7 +421,12 @@ class _MainScreenState extends ConsumerState<MainScreen>
                               ),
                             ),
                             SliverToBoxAdapter(
-                              child: _pagination(page, canNext),
+                              child: PageNavigation(
+                                page: page,
+                                pageCount: pageCount,
+                                enabled: !state.busy && games.isNotEmpty,
+                                onPageChanged: _goToPage,
+                              ),
                             ),
                             if (_sort == GameSort.popular)
                               SliverToBoxAdapter(
@@ -576,7 +584,12 @@ class _MainScreenState extends ConsumerState<MainScreen>
                               ),
                             if (games.isNotEmpty)
                               SliverToBoxAdapter(
-                                child: _pagination(page, canNext),
+                                child: PageNavigation(
+                                  page: page,
+                                  pageCount: pageCount,
+                                  enabled: !state.busy,
+                                  onPageChanged: _goToPage,
+                                ),
                               ),
                             SliverToBoxAdapter(
                               child: Padding(
@@ -587,7 +600,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                   24,
                                 ),
                                 child: Text(
-                                  '${state.complete ? '전체 목록 정렬' : '저장된 일부 목록'} · ${allGames.length}개 · ${allGames.isEmpty ? 1 : (allGames.length / _pageSize).ceil()}페이지\n비공식 팬 앱 · 한국 Nintendo eShop',
+                                  '${state.complete ? '전체 목록 정렬' : '저장된 일부 목록'}\n비공식 팬 앱 · 한국 Nintendo eShop',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
                                     fontSize: 11,
@@ -718,29 +731,6 @@ class _MainScreenState extends ConsumerState<MainScreen>
       ),
     );
   }
-
-  Widget _pagination(int page, bool canNext) => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
-    child: Wrap(
-      alignment: WrapAlignment.center,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 12,
-      runSpacing: 8,
-      children: [
-        OutlinedButton.icon(
-          onPressed: page > 0 ? () => _goToPage(page - 1) : null,
-          icon: const Icon(Icons.chevron_left),
-          label: const Text('이전'),
-        ),
-        Text('${page + 1}페이지 · 20개씩', style: const TextStyle(fontSize: 12)),
-        OutlinedButton.icon(
-          onPressed: canNext ? () => _goToPage(page + 1) : null,
-          icon: const Icon(Icons.chevron_right),
-          label: const Text('다음'),
-        ),
-      ],
-    ),
-  );
 
   Widget _notice(
     String message, {
