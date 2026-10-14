@@ -22,24 +22,28 @@ class PageNavigation extends StatelessWidget {
     final groupEnd = math.min(groupStart + _groupSize, pageCount);
     final numberStyle = OutlinedButton.styleFrom(
       minimumSize: const Size(44, 44),
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+    final arrowStyle = numberStyle.copyWith(
+      padding: const WidgetStatePropertyAll(EdgeInsets.zero),
     );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
       child: Wrap(
         alignment: WrapAlignment.center,
         crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 8,
+        spacing: 4,
         runSpacing: 8,
         children: [
           Tooltip(
             message: '이전 5페이지',
-            child: OutlinedButton.icon(
+            child: OutlinedButton(
+              style: arrowStyle,
               onPressed: enabled && groupStart > 0
                   ? () => onPageChanged(groupStart - _groupSize)
                   : null,
-              icon: const Icon(Icons.chevron_left),
-              label: const Text('이전'),
+              child: const Icon(Icons.chevron_left),
             ),
           ),
           for (var index = groupStart; index < groupEnd; index++)
@@ -60,12 +64,12 @@ class PageNavigation extends StatelessWidget {
             ),
           Tooltip(
             message: '다음 5페이지',
-            child: OutlinedButton.icon(
+            child: OutlinedButton(
+              style: arrowStyle,
               onPressed: enabled && groupEnd < pageCount
                   ? () => onPageChanged(groupEnd)
                   : null,
-              icon: const Icon(Icons.chevron_right),
-              label: const Text('다음'),
+              child: const Icon(Icons.chevron_right),
             ),
           ),
         ],
