@@ -12,6 +12,48 @@ import 'package:switch_sale_tracker/presentation/widgets/page_navigation.dart';
 import 'support/fakes.dart';
 
 void main() {
+  testWidgets('icon arrows and five page numbers stay on one line at 360px', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final selected = <int>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PageNavigation(
+            page: 5,
+            pageCount: 15,
+            onPageChanged: selected.add,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('이전'), findsNothing);
+    expect(find.text('다음'), findsNothing);
+    final previous = find.widgetWithIcon(OutlinedButton, Icons.chevron_left);
+    final next = find.widgetWithIcon(OutlinedButton, Icons.chevron_right);
+    final rowTop = tester.getTopLeft(previous).dy;
+    for (final button in [
+      next,
+      find.widgetWithText(FilledButton, '6'),
+      for (var number = 7; number <= 10; number++)
+        find.widgetWithText(OutlinedButton, '$number'),
+    ]) {
+      expect(tester.getTopLeft(button).dy, rowTop);
+    }
+    await tester.tap(next);
+    expect(selected, [10]);
+    await tester.tap(previous);
+    expect(selected, [10, 0]);
+    expect(find.byTooltip('이전 5페이지'), findsOneWidget);
+    expect(find.byTooltip('다음 5페이지'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('page numbers and five-page groups jump without fetching', (
     tester,
   ) async {
@@ -45,7 +87,14 @@ void main() {
     expect(find.text('총 143개 · 20개 표시 · 1페이지'), findsOneWidget);
     expect(number('5'), findsOneWidget);
     expect(number('6'), findsNothing);
-    expect(tester.widget<OutlinedButton>(number('이전')).onPressed, isNull);
+    expect(
+      tester
+          .widget<OutlinedButton>(
+            find.widgetWithIcon(OutlinedButton, Icons.chevron_left).first,
+          )
+          .onPressed,
+      isNull,
+    );
     await tester.tap(number('5'));
     await tester.pumpAndSettle();
     expect(find.text('총 143개 · 20개 표시 · 5페이지'), findsOneWidget);
@@ -54,13 +103,22 @@ void main() {
       '게임 080',
     );
     expect(find.widgetWithText(FilledButton, '5'), findsOneWidget);
-    await tester.tap(number('다음'));
+    await tester.tap(
+      find.widgetWithIcon(OutlinedButton, Icons.chevron_right).first,
+    );
     await tester.pumpAndSettle();
     expect(find.text('총 143개 · 20개 표시 · 6페이지'), findsOneWidget);
     expect(number('5'), findsNothing);
     expect(number('8'), findsOneWidget);
     expect(number('9'), findsNothing);
-    expect(tester.widget<OutlinedButton>(number('다음')).onPressed, isNull);
+    expect(
+      tester
+          .widget<OutlinedButton>(
+            find.widgetWithIcon(OutlinedButton, Icons.chevron_right).first,
+          )
+          .onPressed,
+      isNull,
+    );
     await tester.tap(number('8'));
     await tester.pumpAndSettle();
     expect(find.text('총 143개 · 3개 표시 · 8페이지'), findsOneWidget);
@@ -73,7 +131,7 @@ void main() {
         .controller!;
     scroll.jumpTo(scroll.position.maxScrollExtent);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('이전').last);
+    await tester.tap(find.byTooltip('이전 5페이지').last);
     await tester.pumpAndSettle();
     expect(scroll.offset, 0);
     expect(find.text('총 143개 · 20개 표시 · 1페이지'), findsOneWidget);
@@ -85,7 +143,14 @@ void main() {
     await tester.enterText(find.byType(TextField), '없는 게임');
     await tester.pumpAndSettle();
     expect(find.text('총 0개 · 0개 표시 · 1페이지'), findsOneWidget);
-    expect(tester.widget<OutlinedButton>(number('다음')).onPressed, isNull);
+    expect(
+      tester
+          .widget<OutlinedButton>(
+            find.widgetWithIcon(OutlinedButton, Icons.chevron_right).first,
+          )
+          .onPressed,
+      isNull,
+    );
     expect(repository.catalogCalls, 1);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
@@ -118,7 +183,7 @@ void main() {
     expect(find.text('106'), findsNothing);
     await tester.tap(find.text('105'));
     expect(selected, [104]);
-    await tester.tap(find.text('이전'));
+    await tester.tap(find.byTooltip('이전 5페이지'));
     expect(selected, [104, 95]);
     expect(tester.takeException(), isNull);
   });
@@ -223,7 +288,7 @@ void main() {
       expect(
         tester
             .widget<OutlinedButton>(
-              find.widgetWithText(OutlinedButton, '다음').first,
+              find.widgetWithIcon(OutlinedButton, Icons.chevron_right).first,
             )
             .onPressed,
         isNull,
@@ -436,7 +501,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('총 48개 · 8개 표시 · 3페이지'), findsOneWidget);
       final next = tester.widget<OutlinedButton>(
-        find.widgetWithText(OutlinedButton, '다음').first,
+        find.widgetWithIcon(OutlinedButton, Icons.chevron_right).first,
       );
       expect(next.onPressed, isNull);
       await tester.pumpWidget(const SizedBox());
