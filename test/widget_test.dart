@@ -8,9 +8,121 @@ import 'package:switch_sale_tracker/presentation/widgets/game_card.dart';
 import 'package:switch_sale_tracker/presentation/controllers/game_list_controller.dart';
 import 'package:switch_sale_tracker/domain/models/game_item.dart';
 import 'package:switch_sale_tracker/presentation/widgets/game_platform_badge.dart';
+import 'package:switch_sale_tracker/presentation/widgets/page_navigation.dart';
 import 'support/fakes.dart';
 
 void main() {
+  testWidgets('page numbers and five-page groups jump without fetching', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 1100);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = FakeRepository()
+      ..games = List.generate(
+        143,
+        (i) => exampleGame(
+          id: '${70010000000000 + i}',
+          name: '게임 ${i.toString().padLeft(3, '0')}',
+        ),
+      );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          localStoreProvider.overrideWithValue(MemoryStore()),
+          gameRepositoryProvider.overrideWithValue(repository),
+        ],
+        child: const TrackerApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final top = find.byType(PageNavigation).first;
+    Finder number(String label) => find.descendant(
+      of: top,
+      matching: find.widgetWithText(OutlinedButton, label),
+    );
+    expect(find.text('총 143개 · 20개 표시 · 1페이지'), findsOneWidget);
+    expect(number('5'), findsOneWidget);
+    expect(number('6'), findsNothing);
+    expect(tester.widget<OutlinedButton>(number('이전')).onPressed, isNull);
+    await tester.tap(number('5'));
+    await tester.pumpAndSettle();
+    expect(find.text('총 143개 · 20개 표시 · 5페이지'), findsOneWidget);
+    expect(
+      tester.widget<GameCard>(find.byType(GameCard).first).game.name,
+      '게임 080',
+    );
+    expect(find.widgetWithText(FilledButton, '5'), findsOneWidget);
+    await tester.tap(number('다음'));
+    await tester.pumpAndSettle();
+    expect(find.text('총 143개 · 20개 표시 · 6페이지'), findsOneWidget);
+    expect(number('5'), findsNothing);
+    expect(number('8'), findsOneWidget);
+    expect(number('9'), findsNothing);
+    expect(tester.widget<OutlinedButton>(number('다음')).onPressed, isNull);
+    await tester.tap(number('8'));
+    await tester.pumpAndSettle();
+    expect(find.text('총 143개 · 3개 표시 · 8페이지'), findsOneWidget);
+    expect(
+      tester.widget<GameCard>(find.byType(GameCard).first).game.name,
+      '게임 140',
+    );
+    final scroll = tester
+        .widget<CustomScrollView>(find.byType(CustomScrollView))
+        .controller!;
+    scroll.jumpTo(scroll.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('이전').last);
+    await tester.pumpAndSettle();
+    expect(scroll.offset, 0);
+    expect(find.text('총 143개 · 20개 표시 · 1페이지'), findsOneWidget);
+    expect(repository.catalogCalls, 1);
+    await tester.enterText(find.byType(TextField), '게임 140');
+    await tester.pumpAndSettle();
+    expect(find.text('총 1개 · 1개 표시 · 1페이지'), findsOneWidget);
+    expect(number('2'), findsNothing);
+    await tester.enterText(find.byType(TextField), '없는 게임');
+    await tester.pumpAndSettle();
+    expect(find.text('총 0개 · 0개 표시 · 1페이지'), findsOneWidget);
+    expect(tester.widget<OutlinedButton>(number('다음')).onPressed, isNull);
+    expect(repository.catalogCalls, 1);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('five page buttons wrap on small screens with large text', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 1.8;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    final selected = <int>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PageNavigation(
+            page: 100,
+            pageCount: 105,
+            onPageChanged: selected.add,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('101'), findsOneWidget);
+    expect(find.text('105'), findsOneWidget);
+    expect(find.text('106'), findsNothing);
+    await tester.tap(find.text('105'));
+    expect(selected, [104]);
+    await tester.tap(find.text('이전'));
+    expect(selected, [104, 95]);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('price age notice uses the 12-hour automatic refresh interval', (
     tester,
   ) async {
@@ -90,27 +202,24 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('다음').first);
+      await tester.tap(find.widgetWithText(OutlinedButton, '2').first);
       await tester.pumpAndSettle();
-      expect(find.text('5개 표시 · 2페이지'), findsOneWidget);
+      expect(find.text('총 25개 · 5개 표시 · 2페이지'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('discount-filter-button')));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(ChoiceChip, '50%대'));
       await tester.pumpAndSettle();
-      expect(find.text('20개 표시 · 1페이지'), findsOneWidget);
-      expect(find.text('한국 공식 할인 게임 23개 발견'), findsOneWidget);
+      expect(find.text('총 23개 · 20개 표시 · 1페이지'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('discount-filter-button')));
       await tester.pumpAndSettle();
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(find.text('할인율 50%대 ▾'), findsOneWidget);
-      expect(find.text('한국 공식 할인 게임 23개 발견'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('platform-filter-button')));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(ChoiceChip, 'Switch 2'));
       await tester.pumpAndSettle();
-      expect(find.text('12개 표시 · 1페이지'), findsOneWidget);
-      expect(find.text('한국 공식 할인 게임 12개 발견'), findsOneWidget);
+      expect(find.text('총 12개 · 12개 표시 · 1페이지'), findsOneWidget);
       expect(
         tester
             .widget<OutlinedButton>(
@@ -125,7 +234,7 @@ void main() {
       );
       await tester.enterText(find.byType(TextField), '테스트 00');
       await tester.pumpAndSettle();
-      expect(find.text('1개 표시 · 1페이지'), findsOneWidget);
+      expect(find.text('총 1개 · 1개 표시 · 1페이지'), findsOneWidget);
       await tester.tap(find.byTooltip('관심 게임에 추가').first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('관심 게임'));
@@ -234,28 +343,26 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('한국 공식 할인 게임 23개 발견'), findsOneWidget);
       expect(find.text('판매가 1,000~4,999원 게임 제외'), findsOneWidget);
-      expect(find.text('20개 표시 · 1페이지'), findsOneWidget);
+      expect(find.text('총 23개 · 20개 표시 · 1페이지'), findsOneWidget);
       expect(
         tester.widget<GameCard>(find.byType(GameCard).first).game.name,
         '무료 게임',
       );
       expect(find.text('제외 게임 1000'), findsNothing);
       expect(store.games, hasLength(27));
-      await tester.tap(find.text('다음').first);
+      await tester.tap(find.widgetWithText(OutlinedButton, '2').first);
       await tester.pumpAndSettle();
-      expect(find.text('3개 표시 · 2페이지'), findsOneWidget);
+      expect(find.text('총 23개 · 3개 표시 · 2페이지'), findsOneWidget);
       expect(repository.catalogCalls, 1);
       await tester.tap(find.byType(DropdownButton<GameSort>));
       await tester.pumpAndSettle();
       await tester.tap(find.text('최저 가격순').last);
       await tester.pumpAndSettle();
-      expect(find.text('20개 표시 · 1페이지'), findsOneWidget);
-      expect(find.text('한국 공식 할인 게임 23개 발견'), findsOneWidget);
+      expect(find.text('총 23개 · 20개 표시 · 1페이지'), findsOneWidget);
       await tester.enterText(find.byType(TextField), '제외 게임');
       await tester.pumpAndSettle();
-      expect(find.text('3개 표시 · 1페이지'), findsOneWidget);
+      expect(find.text('총 3개 · 3개 표시 · 1페이지'), findsOneWidget);
       expect(find.text('제외 게임 1000'), findsOneWidget);
       expect(find.text('판매가 1,000~4,999원 게임 제외'), findsNothing);
       await tester.tap(find.byTooltip('관심 게임에 추가').first);
@@ -296,7 +403,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('20개 표시 · 1페이지'), findsOneWidget);
+      expect(find.text('총 48개 · 20개 표시 · 1페이지'), findsOneWidget);
       expect(
         tester.widget<GameCard>(find.byType(GameCard).first).game.name,
         '게임 24',
@@ -309,25 +416,25 @@ void main() {
           .controller!
           .jumpTo(0);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('다음').first);
+      await tester.tap(find.widgetWithText(OutlinedButton, '2').first);
       await tester.pumpAndSettle();
       expect(repository.catalogCalls, 1);
-      expect(find.text('20개 표시 · 2페이지'), findsOneWidget);
+      expect(find.text('총 48개 · 20개 표시 · 2페이지'), findsOneWidget);
       expect(
         tester.widget<GameCard>(find.byType(GameCard).first).game.name,
         '게임 44',
       );
-      await tester.tap(find.text('이전').first);
+      await tester.tap(find.widgetWithText(OutlinedButton, '1').first);
       await tester.pumpAndSettle();
       expect(
         tester.widget<GameCard>(find.byType(GameCard).first).game.name,
         '게임 24',
       );
-      await tester.tap(find.text('다음').first);
+      await tester.tap(find.widgetWithText(OutlinedButton, '2').first);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('다음').first);
+      await tester.tap(find.widgetWithText(OutlinedButton, '3').first);
       await tester.pumpAndSettle();
-      expect(find.text('8개 표시 · 3페이지'), findsOneWidget);
+      expect(find.text('총 48개 · 8개 표시 · 3페이지'), findsOneWidget);
       final next = tester.widget<OutlinedButton>(
         find.widgetWithText(OutlinedButton, '다음').first,
       );
