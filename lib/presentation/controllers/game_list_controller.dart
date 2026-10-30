@@ -35,7 +35,7 @@ final gameListProvider =
     );
 
 enum GameSort {
-  popular('인기순'),
+  popular('한국 인기순'),
   discount('높은 할인율순'),
   price('최저 가격순'),
   newest('최신 출시순'),
@@ -91,6 +91,18 @@ class GameListState {
   final String? error, storageError, popularityError;
   final String query;
   final CatalogProgress? progress;
+  String? get popularitySource {
+    for (final game in games) {
+      if (game.hasKoreanPopularity) return game.popularitySource;
+    }
+    for (final game in favorites.values) {
+      if (game.hasKoreanPopularity) return game.popularitySource;
+    }
+    return null;
+  }
+
+  String? get popularityPeriod => PopularityIndex.periodLabel(popularitySource);
+
   bool get busy => loading || loadingPopularity || savingFavorite;
   bool get blocking =>
       (loading && !complete) || loadingPopularity || savingFavorite;
@@ -134,14 +146,18 @@ class GameListController extends StateNotifier<GameListState> {
   GameListController(this.repository, this.store)
     : super(
         GameListState(
-          games: store.readGames(),
+          games: store.readGames().map(_koreanRanksOnly).toList(),
           complete: store.catalogComplete,
-          favorites: {for (final g in store.readFavorites()) g.id: g},
+          favorites: {
+            for (final g in store.readFavorites()) g.id: _koreanRanksOnly(g),
+          },
           updatedAt: store.cachedAt,
         ),
       );
   final GameRepository repository;
   final LocalStore store;
+  static GameItem _koreanRanksOnly(GameItem game) =>
+      game.hasKoreanPopularity ? game : game.withPopularityRank(null);
   static const cacheLifetime = Duration(hours: 12);
   final Set<String> _favoriteWrites = {};
   PopularityIndex? _popularity;
@@ -151,7 +167,12 @@ class GameListController extends StateNotifier<GameListState> {
   List<GameItem> _ranked(List<GameItem> games) => _popularity == null
       ? games
       : games
-            .map((g) => g.withPopularityRank(_popularity!.rankFor(g)))
+            .map(
+              (g) => g.withPopularityRank(
+                _popularity!.rankFor(g),
+                source: _popularity!.source,
+              ),
+            )
             .toList();
 
   Future<void> loadPopularity() async {
@@ -166,11 +187,12 @@ class GameListController extends StateNotifier<GameListState> {
           for (final g in _ranked(state.favorites.values.toList())) g.id: g,
         },
       );
+      await _syncFavorites(state.favorites.values.toList());
       await _saveCache();
     } on Object {
       if (mounted) {
         state = state.copyWith(
-          popularityError: '미국 공식 인기 목록을 불러오지 못했습니다. 저장된 순위를 우선 표시합니다.',
+          popularityError: '한국 공식 다운로드 순위를 불러오지 못했습니다. 저장된 한국 순위가 있으면 표시합니다.',
         );
       }
     } finally {
@@ -213,11 +235,16 @@ class GameListController extends StateNotifier<GameListState> {
       if (!mounted) return;
       if (games.isEmpty) throw const FormatException('전체 목록이 비어 있습니다.');
       _catalogAt = reuseMetadata ? catalogAt : DateTime.now().toUtc();
-      final previousRanks = {
-        for (final g in state.games) g.id: g.popularityRank,
-      };
+      final previousRanks = {for (final g in state.games) g.id: g};
       final ranked = _popularity == null
-          ? games.map((g) => g.withPopularityRank(previousRanks[g.id])).toList()
+          ? games
+                .map(
+                  (g) => g.withPopularityRank(
+                    previousRanks[g.id]?.popularityRank,
+                    source: previousRanks[g.id]?.popularitySource,
+                  ),
+                )
+                .toList()
           : _ranked(games);
       state = state.copyWith(
         games: ranked,
@@ -361,6 +388,10 @@ List<GameItem> filterAndSortGames(
   };
   final needle = normalizeSearch(query);
   final filtered = source.where((game) {
+    if (sort == GameSort.popular &&
+        (!game.hasKoreanPopularity || !game.saleActiveAt(now))) {
+      return false;
+    }
     final matchesName =
         needle.isEmpty ||
         normalizeSearch(game.name).contains(needle) ||
@@ -380,6 +411,9 @@ List<GameItem> filterAndSortGames(
     return matchesName && matchesGenre && matchesPlatform && matchesDiscount;
   }).toList();
   filtered.sort((a, b) {
+    if (sort == GameSort.popular && a.platform != b.platform) {
+      return a.platform.index.compareTo(b.platform.index);
+    }
     final result = switch (sort) {
       GameSort.popular => (a.popularityRank ?? 1 << 30).compareTo(
         b.popularityRank ?? 1 << 30,

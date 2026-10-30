@@ -19,11 +19,13 @@ class GameCard extends StatelessWidget {
     required this.favorite,
     required this.onFavorite,
     required this.now,
+    this.showPopularityRank = false,
   });
   final GameItem game;
   final bool favorite;
   final VoidCallback onFavorite;
   final DateTime now;
+  final bool showPopularityRank;
 
   @override
   Widget build(BuildContext context) {
@@ -116,6 +118,14 @@ class GameCard extends StatelessWidget {
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         GamePlatformBadge(game: game),
+                        if (showPopularityRank && game.hasKoreanPopularity)
+                          Text(
+                            '한국 ${game.platformLabel} 다운로드 ${game.popularityRank}위',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         if (game.genres.isNotEmpty)
                           Text(
                             game.genres.take(3).join(' · '),

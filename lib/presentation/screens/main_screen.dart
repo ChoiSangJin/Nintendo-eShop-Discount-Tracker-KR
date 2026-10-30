@@ -49,12 +49,18 @@ class _MainScreenState extends ConsumerState<MainScreen>
   List<GameItem> _filtered(GameListState state, {DateTime? at}) {
     final wishlist = _tab == 1;
     final now = at ?? DateTime.now().toUtc();
+    final rankSource = state.popularitySource;
+    final source = wishlist
+        ? state.favorites.values
+        : state.games.where(
+            (g) => _sort == GameSort.popular
+                ? g.saleActiveAt(now)
+                : matchesBrowse(g, _browse, state.query, now),
+          );
     return filterAndSortGames(
-      wishlist
-          ? state.favorites.values
-          : state.games.where(
-              (g) => matchesBrowse(g, _browse, state.query, now),
-            ),
+      source.where(
+        (g) => _sort != GameSort.popular || g.popularitySource == rankSource,
+      ),
       genre: _genre,
       query: _query,
       sort: _sort,
@@ -190,7 +196,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                       onPressed: () => showAboutDialog(
                         context: context,
                         applicationName: 'Switch 할인 트래커 KR',
-                        applicationVersion: '1.4.0',
+                        applicationVersion: '1.4.1',
                         applicationIcon: const Icon(
                           Icons.sports_esports_rounded,
                           color: Color(0xffe60012),
@@ -439,6 +445,9 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                             _resetPage();
                                           });
                                           if (value == GameSort.popular) {
+                                            setState(
+                                              () => _browse = GameBrowse.sales,
+                                            );
                                             unawaited(
                                               controller.loadPopularity(),
                                             );
@@ -478,9 +487,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
                               SliverToBoxAdapter(
                                 child: _notice(
                                   state.loadingPopularity
-                                      ? '미국 공식 인기 목록 확인 중'
-                                      : state.popularityError ??
-                                            '미국 공식 Best Sellers 기준 · 순위가 확인된 게임 우선',
+                                      ? '한국 공식 다운로드 순위 확인 중'
+                                      : '${state.popularityError == null ? '' : '${state.popularityError}\n'}한국 공식 다운로드 순위${state.popularityPeriod == null ? '' : ' · ${state.popularityPeriod}'} · 유료 · 기종별 · 현재 할인 상품만',
                                   icon: Icons.trending_up_rounded,
                                   action: state.popularityError == null
                                       ? null
@@ -558,6 +566,10 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                             ? '조건에 맞는 게임이 없어요'
                                             : wishlist
                                             ? '관심 있는 할인 게임을 추가해 보세요'
+                                            : _sort == GameSort.popular
+                                            ? state.popularityPeriod == null
+                                                  ? '한국 순위를 불러오면 할인 상품을 표시해요'
+                                                  : '현재 할인 중인 한국 순위 상품이 없어요'
                                             : switch (_browse) {
                                                 GameBrowse.sales =>
                                                   '현재 할인 게임이 없어요',
@@ -633,6 +645,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                                 child: GameCard(
                                                   key: ValueKey(game.id),
                                                   game: game,
+                                                  showPopularityRank:
+                                                      _sort == GameSort.popular,
                                                   now: now,
                                                   favorite: state.favorites
                                                       .containsKey(game.id),
@@ -744,7 +758,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                   liveRegion: true,
                                   child: Text(
                                     state.loadingPopularity
-                                        ? '미국 공식 인기 목록 확인 중'
+                                        ? '한국 공식 다운로드 순위 확인 중'
                                         : state.savingFavorite
                                         ? '관심 게임 저장 중'
                                         : state.progress?.label ??

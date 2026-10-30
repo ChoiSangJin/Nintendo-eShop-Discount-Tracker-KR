@@ -674,7 +674,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
-  testWidgets('popular sort explains US source and prioritizes ranked games', (
+  testWidgets('Korean popular sort shows only ranked games currently on sale', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(430, 1100);
@@ -684,9 +684,10 @@ void main() {
     final repository = FakeRepository()
       ..games = [
         exampleGame(id: '70010000000001', name: '높은 할인', discount: 6000),
-        exampleGame(id: '70010000000002', name: '높은 인기', discount: 25000),
+        exampleGame(id: '70010000000002', name: '높은 인기', discount: 3000),
+        exampleGame(id: '70010000000003', name: '정가 순위 게임', discount: null),
       ]
-      ..popularity = {'70010000000002': 1};
+      ..popularity = {'70010000000002': 2, '70010000000003': 1};
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -699,13 +700,19 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byType(DropdownButton<GameSort>));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('인기순').last);
+    await tester.tap(find.text('한국 인기순').last);
     await tester.pumpAndSettle();
-    expect(find.text('미국 공식 Best Sellers 기준 · 순위가 확인된 게임 우선'), findsOneWidget);
+    expect(
+      find.text('한국 공식 다운로드 순위 · 2026년 상반기 · 유료 · 기종별 · 현재 할인 상품만'),
+      findsOneWidget,
+    );
     expect(
       tester.widget<GameCard>(find.byType(GameCard).first).game.name,
       '높은 인기',
     );
+    expect(find.byType(GameCard), findsOneWidget);
+    expect(find.text('₩3,000'), findsOneWidget);
+    expect(find.text('한국 Switch 1 다운로드 2위'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });

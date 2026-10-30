@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -219,39 +218,88 @@ void main() {
     },
   );
   test(
-    'only the official best-seller grid supplies ranks, duplicates keep first rank',
+    'Korean ranking parser validates period, platform, consecutive ranks and official store IDs',
     () {
-      final data = {
-        'props': {
-          'pageProps': {
-            'page': {
-              'slug': '/games/best-sellers/',
-              'content': {
-                'merchandisedGrid': [
-                  {'nsuid': '70010000000001', 'name': '인기 게임'},
-                  {'nsuid': null},
-                  {'nsuid': '70010000000002', 'name': '또 다른 게임'},
-                  {'nsuid': '70010000000001'},
-                ],
-              },
-            },
-          },
-        },
-      };
-      final body =
-          '<script id="__NEXT_DATA__" type="application/json">${jsonEncode(data)}</script>';
-      expect(NintendoGameRepository.parsePopularity(body).byId, {
-        '70010000000001': 1,
-        '70010000000002': 3,
-      });
+      const url =
+          'https://www.nintendo.com/kr/switch/ranking/ranking_2027_full.html';
+      const body =
+          '<div id="featureListRanking">'
+          '<div id="featureListRanking__headlineTextArea">Nintendo Switch 2027년 연간 다운로드 랭킹 ※유료 소프트웨어 대상으로 집계</div>'
+          '<div data-rank="1"><a href="https://store.nintendo.co.kr/70010000000001"><p class="tit">첫 게임</p></a></div>'
+          '<div data-rank="2"><a href="https://store.nintendo.co.kr/70010000000002"><p class="tit">다음 게임</p></a></div></div>';
+      final index = NintendoGameRepository.parsePopularity(
+        body,
+        sourceUrl: Uri.parse(url),
+      );
+      expect(index.source, 'kr:2027:full');
+      expect(index.byId, {'70010000000001': 1, '70010000000002': 2});
+      for (final changed in [
+        body.replaceAll('2027년', '2026년'),
+        body.replaceAll('data-rank="2"', 'data-rank="3"'),
+        body.replaceAll('store.nintendo.co.kr', 'example.com'),
+        body.replaceAll('70010000000002', '70010000000001'),
+      ]) {
+        expect(
+          () => NintendoGameRepository.parsePopularity(
+            changed,
+            sourceUrl: Uri.parse(url),
+          ),
+          throwsFormatException,
+        );
+      }
       expect(
         () => NintendoGameRepository.parsePopularity(
-          body.replaceAll('/games/best-sellers/', '/games/'),
+          body,
+          sourceUrl: Uri.parse(
+            url.replaceAll('_full.html', '_full_switch2.html'),
+          ),
         ),
         throwsFormatException,
       );
     },
   );
+  test('latest period and Switch 2 link are discovered from official pages', () async {
+    final dio = Dio();
+    final paths = <String>[];
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          paths.add(options.uri.path);
+          final switch2 = options.uri.path.endsWith('_switch2.html');
+          handler.resolve(
+            Response(
+              requestOptions: options,
+              data: options.uri.path.endsWith('/ranking/')
+                  ? "<script>window.location.href = 'ranking_2028_1st.html';</script>"
+                  : '<div id="featureListRanking">'
+                        '<div id="featureListRanking__tabSwitcherArea"><a href="ranking_2028_1st_switch2.html">Switch 2</a></div>'
+                        '<div id="featureListRanking__headlineTextArea">Nintendo Switch${switch2 ? ' 2' : ''} 2028년 상반기 다운로드 랭킹 ※유료</div>'
+                        '<div data-rank="1"><a href="https://store.nintendo.co.kr/${switch2 ? '70010000000002' : '70010000000001'}"><p class="tit">게임</p></a></div></div>',
+            ),
+          );
+        },
+      ),
+    );
+    final index = await NintendoGameRepository(
+      dio,
+      KoreanTitleResolver(dio, MemoryStore()),
+    ).fetchPopularity();
+    expect(index.source, 'kr:2028:1st');
+    expect(index.byId, {'70010000000001': 1, '70010000000002': 1});
+    expect(paths, [
+      '/kr/switch/ranking/',
+      '/kr/switch/ranking/ranking_2028_1st.html',
+      '/kr/switch/ranking/ranking_2028_1st_switch2.html',
+    ]);
+    expect(
+      () => NintendoGameRepository.rankingUrl(
+        'https://example.com/ranking_2028_1st.html',
+        Uri.parse('https://www.nintendo.com/kr/switch/ranking/'),
+      ),
+      throwsFormatException,
+    );
+    dio.close();
+  });
   test('61 price lookups use exactly 30/30/1 IDs and KR/ko', () async {
     final dio = Dio();
     final counts = <int>[];

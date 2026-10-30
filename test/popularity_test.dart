@@ -1,64 +1,48 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:switch_sale_tracker/domain/models/game_item.dart';
 import 'package:switch_sale_tracker/domain/models/popularity_index.dart';
-
-GameItem title(String name, {String hardware = 'Nintendo Switch'}) => GameItem(
-  id: '70010000000001',
-  name: name,
-  originalName: name,
-  hardware: hardware,
-);
+import 'support/fakes.dart';
 
 void main() {
   test(
-    'regional IDs match exact English title and hardware, keeping editions distinct',
+    'Korean rankings match exact IDs and platform, with no regional aliases',
     () {
       final index = PopularityIndex(
-        {'70010000000999': 1},
-        byTitle: {
-          PopularityIndex.key('Hogwarts Legacy', 'Nintendo Switch'): 1,
-          PopularityIndex.key('Hogwarts Legacy', 'Nintendo Switch 2'): 19,
-        },
+        {'70010000000001': 5},
+        source: 'kr:2027:full',
+        entries: [
+          const PopularityEntry(
+            '70010000000001',
+            '공식 제목',
+            GamePlatform.switch1,
+            5,
+          ),
+        ],
       );
-      expect(index.rankFor(title('호그와트 레거시 (Hogwarts Legacy)')), 1);
+      expect(index.rankFor(exampleGame()), 5);
       expect(
-        index.rankFor(
-          title('호그와트 레거시 (Hogwarts Legacy)', hardware: 'Nintendo Switch 2'),
-        ),
-        19,
-      );
-      expect(
-        index.rankFor(title('Hogwarts Legacy Digital Deluxe Edition')),
+        index.rankFor(exampleGame(id: '70010000000002', name: '공식 제목')),
         isNull,
       );
-      expect(index.rankFor(title('Hogwarts')), isNull);
+      expect(index.rankFor(exampleGame(hardware: 'Nintendo Switch 2')), isNull);
+      expect(PopularityIndex.periodLabel(index.source), '2027년 연간');
+      expect(PopularityIndex.periodLabel('us:2027:full'), isNull);
     },
   );
   test(
-    'verified Korean Pokémon alias uses current list position without a fixed score',
+    'rank source survives names, prices and cache; old US ranks stay unverified',
     () {
-      final key = PopularityIndex.key(
-        'Pokémon™ Legends: Arceus',
-        'Nintendo Switch',
+      final game = exampleGame().withPopularityRank(8, source: 'kr:2026:1st');
+      final restored = GameItem.fromJson(
+        game.withName('공식 제목').withPrice({
+          'regular_price': {'raw_value': '10000'},
+          'discount_price': {'raw_value': '5000'},
+        }, DateTime.now()).toJson(),
       );
-      expect(
-        PopularityIndex(
-          {},
-          byTitle: {key: 81},
-        ).rankFor(title('Pokémon LEGENDS 아르세우스')),
-        81,
-      );
-      expect(
-        PopularityIndex(
-          {},
-          byTitle: {key: 7},
-        ).rankFor(title('Pokémon LEGENDS 아르세우스')),
-        7,
-      );
-      expect(
-        PopularityIndex({}).rankFor(title('Pokémon LEGENDS 아르세우스')),
-        isNull,
-      );
+      expect(restored.hasKoreanPopularity, isTrue);
+      expect(restored.popularityRank, 8);
+      expect(restored.popularitySource, 'kr:2026:1st');
+      expect(exampleGame().withPopularityRank(1).hasKoreanPopularity, isFalse);
     },
   );
 }

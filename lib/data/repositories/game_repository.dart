@@ -187,46 +187,133 @@ class NintendoGameRepository implements GameRepository {
     return games.values.toList();
   }
 
-  @override
-  Future<PopularityIndex> fetchPopularity() async {
-    final response = await dio.get<String>(
-      'https://www.nintendo.com/us/store/games/best-sellers/',
-      options: Options(responseType: ResponseType.plain),
-    );
-    return parsePopularity(response.data ?? '');
+  static final _rankingFile = RegExp(
+    r'^/kr/switch/ranking/ranking_(\d{4})_(1st|full)(_switch2)?\.html$',
+  );
+
+  static Uri rankingUrl(String href, Uri base) {
+    final uri = base.resolve(href);
+    if (uri.scheme != 'https' ||
+        uri.host != 'www.nintendo.com' ||
+        uri.userInfo.isNotEmpty ||
+        uri.port != 443 ||
+        uri.hasQuery ||
+        uri.hasFragment ||
+        !_rankingFile.hasMatch(uri.path)) {
+      throw const FormatException('한국 공식 순위 경로를 확인할 수 없습니다.');
+    }
+    return uri;
   }
 
-  static PopularityIndex parsePopularity(String body) {
-    final script = html.parse(body).querySelector('script#__NEXT_DATA__')?.text;
-    if (script == null) throw const FormatException('공식 인기 목록 형식이 바뀌었습니다.');
-    final data = jsonDecode(script) as Map<String, dynamic>;
-    final page = data['props']['pageProps']['page'];
-    if (page['slug'] != '/games/best-sellers/') {
-      throw const FormatException('공식 인기 목록을 확인할 수 없습니다.');
+  @override
+  Future<PopularityIndex> fetchPopularity() async {
+    Future<String> read(Uri uri) async =>
+        (await dio.get<String>(
+          uri.toString(),
+          options: Options(responseType: ResponseType.plain),
+        )).data ??
+        '';
+    final entry = Uri.parse('https://www.nintendo.com/kr/switch/ranking/');
+    final landing = await read(entry);
+    final redirect = RegExp(
+      r'''window\.location\.href\s*=\s*['"]([^'"]+)['"]''',
+    ).firstMatch(landing);
+    if (redirect == null) {
+      throw const FormatException('한국 공식 최신 순위 경로가 바뀌었습니다.');
     }
-    final items = page['content']['merchandisedGrid'] as List;
-    final ranks = <String, int>{};
-    final titles = <String, int>{};
+    final firstUrl = rankingUrl(redirect[1]!, entry);
+    if (firstUrl.path.endsWith('_switch2.html')) {
+      throw const FormatException('한국 공식 기종별 순위 경로를 확인할 수 없습니다.');
+    }
+    final firstBody = await read(firstUrl);
+    final first = parsePopularity(firstBody, sourceUrl: firstUrl);
+    final secondPath = firstUrl.path.replaceFirst('.html', '_switch2.html');
+    final secondLinks = html
+        .parse(firstBody)
+        .querySelectorAll('#featureListRanking__tabSwitcherArea a[href]');
+    final secondUrl = secondLinks
+        .map((a) => firstUrl.resolve(a.attributes['href']!))
+        .where((uri) => uri.host == firstUrl.host && uri.path == secondPath)
+        .firstOrNull;
+    if (secondUrl == null) {
+      throw const FormatException('한국 공식 Switch 2 순위 링크를 확인할 수 없습니다.');
+    }
+    final second = parsePopularity(
+      await read(rankingUrl(secondUrl.toString(), firstUrl)),
+      sourceUrl: secondUrl,
+    );
+    if (first.source != second.source ||
+        first.byId.keys.any(second.byId.containsKey)) {
+      throw const FormatException('한국 공식 기종별 순위의 집계 기간 또는 상품 ID가 일치하지 않습니다.');
+    }
+    return PopularityIndex(
+      {...first.byId, ...second.byId},
+      source: first.source,
+      entries: [...first.entries, ...second.entries],
+    );
+  }
+
+  static PopularityIndex parsePopularity(
+    String body, {
+    required Uri sourceUrl,
+  }) {
+    final uri = rankingUrl(sourceUrl.toString(), sourceUrl);
+    final period = _rankingFile.firstMatch(uri.path)!;
+    final source = 'kr:${period[1]}:${period[2]}';
+    final switch2 = period[3] != null;
+    final platform = switch2 ? GamePlatform.switch2 : GamePlatform.switch1;
+    final document = html.parse(body);
+    final heading =
+        document
+            .querySelector('#featureListRanking__headlineTextArea')
+            ?.text
+            .replaceAll(RegExp(r'\s+'), ' ') ??
+        '';
+    if (!heading.contains('Nintendo Switch') ||
+        heading.contains('Nintendo Switch 2 ') != switch2 ||
+        !heading.contains('${PopularityIndex.periodLabel(source)} 다운로드 랭킹') ||
+        !heading.contains('유료')) {
+      throw const FormatException('한국 공식 순위의 집계 기간과 대상을 확인할 수 없습니다.');
+    }
     final entries = <PopularityEntry>[];
-    for (var i = 0; i < items.length; i++) {
-      final id = (items[i] as Map)['nsuid']?.toString() ?? '';
-      if (RegExp(r'^\d{14}$').hasMatch(id)) {
-        ranks.putIfAbsent(id, () => i + 1);
-        final item = items[i] as Map;
-        final name = item['name'];
-        final hardware = item['platform'];
-        if (name is String &&
-            hardware is String &&
-            name.isNotEmpty &&
-            (hardware == 'Nintendo Switch' ||
-                hardware == 'Nintendo Switch 2')) {
-          titles.putIfAbsent(PopularityIndex.key(name, hardware), () => i + 1);
-          entries.add(PopularityEntry(id, name, hardware, i + 1));
-        }
+    for (final card in document.querySelectorAll(
+      '#featureListRanking [data-rank]',
+    )) {
+      final rank = int.tryParse(card.attributes['data-rank'] ?? '');
+      final title = card.querySelector('.tit')?.text.trim() ?? '';
+      final link = Uri.tryParse(
+        card.querySelector('a[href]')?.attributes['href'] ?? '',
+      );
+      if (rank == null ||
+          rank <= 0 ||
+          title.isEmpty ||
+          link == null ||
+          link.scheme != 'https' ||
+          link.host != 'store.nintendo.co.kr' ||
+          link.userInfo.isNotEmpty ||
+          link.pathSegments.length != 1 ||
+          !isStoreId(link.pathSegments.single)) {
+        throw const FormatException('한국 공식 순위 항목을 확인할 수 없습니다.');
+      }
+      entries.add(
+        PopularityEntry(link.pathSegments.single, title, platform, rank),
+      );
+    }
+    entries.sort((a, b) => a.rank.compareTo(b.rank));
+    if (entries.isEmpty ||
+        entries.map((e) => e.id).toSet().length != entries.length) {
+      throw const FormatException('한국 공식 순위가 비어 있거나 중복되었습니다.');
+    }
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i].rank != i + 1) {
+        throw const FormatException('한국 공식 순위에 누락 또는 중복이 있습니다.');
       }
     }
-    if (ranks.isEmpty) throw const FormatException('공식 인기 목록이 비어 있습니다.');
-    return PopularityIndex(ranks, byTitle: titles, entries: entries);
+    return PopularityIndex(
+      {for (final e in entries) e.id: e.rank},
+      source: source,
+      entries: entries,
+    );
   }
 
   @override
