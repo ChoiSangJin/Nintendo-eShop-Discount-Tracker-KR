@@ -47,6 +47,7 @@ class GameItem {
     this.priceCheckedAt,
     this.hardware = 'Nintendo Switch',
     this.popularityRank,
+    this.popularitySource,
     this.sourceUrl,
     this.publisher,
     this.supportedLanguages = const [],
@@ -66,6 +67,11 @@ class GameItem {
   final DateTime? priceCheckedAt;
   final String hardware;
   final int? popularityRank;
+  final String? popularitySource;
+  bool get hasKoreanPopularity =>
+      popularityRank != null &&
+      popularityRank! > 0 &&
+      RegExp(r'^kr:\d{4}:(1st|full)$').hasMatch(popularitySource ?? '');
   final String? sourceUrl;
   final String? publisher;
   final List<String> supportedLanguages;
@@ -143,14 +149,19 @@ class GameItem {
     priceCheckedAt: priceCheckedAt,
     hardware: hardware,
     popularityRank: popularityRank,
+    popularitySource: popularitySource,
     sourceUrl: sourceUrl,
     publisher: publisher,
     supportedLanguages: supportedLanguages,
     releaseUndecided: releaseUndecided,
   );
 
-  GameItem withPopularityRank(int? rank) =>
-      GameItem.fromJson({...toJson(), 'popularityRank': rank});
+  GameItem withPopularityRank(int? rank, {String? source}) =>
+      GameItem.fromJson({
+        ...toJson(),
+        'popularityRank': rank,
+        'popularitySource': rank == null ? null : source,
+      });
 
   GameItem withPrice(Map<String, dynamic>? json, DateTime checkedAt) {
     final regular = json?['regular_price'];
@@ -175,6 +186,7 @@ class GameItem {
       priceCheckedAt: json == null ? null : checkedAt,
       hardware: hardware,
       popularityRank: popularityRank,
+      popularitySource: popularitySource,
       sourceUrl: sourceUrl,
       publisher: publisher,
       supportedLanguages: supportedLanguages,
@@ -255,6 +267,7 @@ class GameItem {
     'priceCheckedAt': priceCheckedAt?.toIso8601String(),
     'hardware': hardware,
     'popularityRank': popularityRank,
+    'popularitySource': popularitySource,
     'sourceUrl': sourceUrl,
     'publisher': publisher,
     'supportedLanguages': supportedLanguages,
@@ -275,6 +288,7 @@ class GameItem {
     priceCheckedAt: parseDate(json['priceCheckedAt']),
     hardware: json['hardware']?.toString() ?? 'Nintendo Switch',
     popularityRank: (json['popularityRank'] as num?)?.toInt(),
+    popularitySource: json['popularitySource'] as String?,
     sourceUrl: catalogSourceUrl(json['sourceUrl']),
     publisher: json['publisher'] as String?,
     supportedLanguages: List<String>.from(

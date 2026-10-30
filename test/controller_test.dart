@@ -6,6 +6,64 @@ import 'support/fakes.dart';
 
 void main() {
   test(
+    'old US ranks are discarded, Korean provenance survives restart and price refresh',
+    () async {
+      final store = MemoryStore();
+      await store.saveGames([
+        exampleGame(id: 'us').withPopularityRank(1),
+        exampleGame(id: 'kr').withPopularityRank(3, source: 'kr:2026:1st'),
+      ], DateTime.now());
+      await store.saveFavorite(store.games.first);
+      final repo = FakeRepository()
+        ..games = [exampleGame(id: 'us'), exampleGame(id: 'kr')];
+      final controller = GameListController(repo, store);
+      expect(controller.state.games.first.popularityRank, isNull);
+      expect(controller.state.favorites['us']!.popularityRank, isNull);
+      expect(controller.state.popularityPeriod, '2026년 상반기');
+      await controller.refresh();
+      expect(controller.state.games.first.popularityRank, isNull);
+      expect(controller.state.games.last.popularityRank, 3);
+      expect(store.games.last.popularitySource, 'kr:2026:1st');
+      controller.dispose();
+    },
+  );
+
+  test(
+    'popular results include only active ranked Korean discounts and group platform-specific ranks',
+    () {
+      final now = DateTime.utc(2026, 10, 30);
+      final games = [
+        exampleGame(
+          id: 'low-price',
+          discount: 1500,
+        ).withPopularityRank(4, source: 'kr:2026:1st'),
+        exampleGame(
+          id: 'switch2',
+          hardware: 'Nintendo Switch 2',
+        ).withPopularityRank(1, source: 'kr:2026:1st'),
+        exampleGame(
+          id: 'regular',
+          discount: null,
+        ).withPopularityRank(1, source: 'kr:2026:1st'),
+        exampleGame(
+          id: 'expired',
+          end: now,
+        ).withPopularityRank(2, source: 'kr:2026:1st'),
+        exampleGame(id: 'unranked'),
+        exampleGame(id: 'us').withPopularityRank(1),
+      ];
+      final found = filterAndSortGames(
+        games,
+        genre: '전체',
+        query: '',
+        sort: GameSort.popular,
+        now: now,
+      );
+      expect(found.map((g) => g.id), ['low-price', 'switch2']);
+    },
+  );
+
+  test(
     'whole catalog publishes only after completion; failure preserves snapshot',
     () async {
       final store = MemoryStore();

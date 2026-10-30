@@ -98,7 +98,7 @@ class FakeRepository implements GameRepository {
   @override
   Future<PopularityIndex> fetchPopularity() async {
     if (failure != null) throw failure!;
-    return PopularityIndex(popularity);
+    return PopularityIndex(popularity, source: 'kr:2026:1st');
   }
 
   @override
