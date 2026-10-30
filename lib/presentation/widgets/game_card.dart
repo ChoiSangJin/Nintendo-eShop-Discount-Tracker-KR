@@ -129,6 +129,15 @@ class GameCard extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 14),
+                    if (game.upcomingAt(now)) ...[
+                      Text(
+                        game.releaseUndecided
+                            ? '발매 예정 · 일정 미정'
+                            : '발매 예정 · ${DateFormat('yyyy.MM.dd').format(game.releaseDate!)}',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     Wrap(
                       spacing: 10,
                       runSpacing: 4,
@@ -274,6 +283,10 @@ Future<void> showGameDetails(
           GamePlatformBadge(game: game),
           const SizedBox(height: 8),
           if (game.genres.isNotEmpty) Text('장르  ${game.genres.join(' · ')}'),
+          if (game.publisher != null && game.publisher!.isNotEmpty)
+            Text('배급사  ${game.publisher}'),
+          if (game.supportsKorean) const Text('한국어 지원'),
+          if (game.releaseUndecided) const Text('발매 예정 · 일정 미정'),
           if (game.releaseDate != null)
             Text('출시일  ${DateFormat('yyyy.MM.dd').format(game.releaseDate!)}'),
           if (game.saleActiveAt(now) && game.discountEnd != null)

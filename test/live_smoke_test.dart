@@ -18,8 +18,16 @@ void main() {
           receiveTimeout: const Duration(seconds: 30),
         ),
       );
+      var catalogRequests = 0;
+      var priceRequests = 0;
+      final elapsed = Stopwatch()..start();
       dio.interceptors.add(
         InterceptorsWrapper(
+          onRequest: (options, handler) {
+            if (options.uri.path == '/kr/api/software') catalogRequests++;
+            if (options.uri.path == '/v1/price') priceRequests++;
+            handler.next(options);
+          },
           onError: (error, handler) {
             stdout.writeln(
               'Official API failed: ${error.requestOptions.uri} (HTTP ${error.response?.statusCode})',
@@ -52,6 +60,13 @@ void main() {
           },
         );
         final now = DateTime.now().toUtc();
+        final upcoming = games.where((g) => g.upcomingAt(now)).toList();
+        expect(upcoming, isNotEmpty);
+        expect(games.any((g) => g.supportsKorean), isTrue);
+        expect(games.any((g) => g.publisher?.isNotEmpty == true), isTrue);
+        stdout.writeln(
+          'Catalog + prices: ${elapsed.elapsed.inMilliseconds} ms; $catalogRequests catalog requests, $priceRequests price requests; ${upcoming.length} upcoming games.',
+        );
         final sales = games.where((g) => g.saleActiveAt(now)).toList();
         expect(games.map((g) => g.id).toSet().length, games.length);
         expect(sales, isNotEmpty);

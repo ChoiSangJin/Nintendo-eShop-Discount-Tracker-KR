@@ -65,6 +65,7 @@ class NintendoGameRepository implements GameRepository {
     final total = first['total'] as int;
     final pages = (total / catalogPageSize).ceil();
     final records = <String, Map<String, dynamic>>{};
+    final boundaryPages = <num>{};
     void accept(Map<String, dynamic> data, num number) {
       final items = data['items'] as List;
       final offset = ((number - 1) * catalogPageSize).round();
@@ -78,6 +79,7 @@ class NintendoGameRepository implements GameRepository {
             item['sys']['id'] is! String) {
           throw const FormatException('카탈로그 항목을 확인할 수 없습니다.');
         }
+        if (records.containsKey(item['sys']['id'])) boundaryPages.add(number);
         records.putIfAbsent(
           item['sys']['id'] as String,
           () => Map<String, dynamic>.from(item),
@@ -92,19 +94,38 @@ class NintendoGameRepository implements GameRepository {
       bool oldest = false,
       bool finishEarly = true,
     }) async {
-      for (var start = 0; start < numbers.length; start += 4) {
-        final batch = numbers.sublist(start, min(start + 4, numbers.length));
-        final results = await Future.wait(
-          batch.map((n) => page(n, oldest: oldest)),
-        );
-        for (var i = 0; i < results.length; i++) {
-          accept(results[i], batch[i]);
+      var next = 0;
+      var failed = false;
+      Future<void> worker() async {
+        try {
+          while (next < numbers.length &&
+              !failed &&
+              !(finishEarly && records.length == total)) {
+            final number = numbers[next++];
+            accept(await page(number, oldest: oldest), number);
+          }
+        } on Object {
+          failed = true;
+          rethrow;
         }
-        if (records.length == total && finishEarly) return;
       }
+
+      await Future.wait(List.generate(min(4, numbers.length), (_) => worker()));
     }
 
     await scan(List.generate(pages - 1, (i) => i + 2), finishEarly: false);
+    // Repair the boundaries that actually overlapped before rescanning the
+    // entire catalog in reverse. Keep the full coverage checks below.
+    if (records.length < total) {
+      final repairs = {
+        for (final number in boundaryPages)
+          for (final shift in [-0.5, 0.5])
+            if (number + shift >= 1 &&
+                (number + shift - 1) * catalogPageSize < total)
+              number + shift,
+      }.toList()..sort();
+      await scan(repairs);
+    }
     // Nintendo sorts only by release date. Equal-date records can move across
     // offset boundaries even in an unchanged catalog. Scan the reverse order
     // and overlapping windows until every distinct official record is present.
@@ -196,18 +217,15 @@ class NintendoGameRepository implements GameRepository {
     final prices = <String, Map<String, dynamic>>{};
     final ids = games.map((game) => game.id).where(isStoreId).toSet().toList();
     var completed = 0;
+    var next = 0;
+    var failed = false;
     onProgress?.call(CatalogProgress('전체 게임 가격 확인 중', 0, ids.length));
-    for (var start = 0; start < ids.length; start += pageSize * 4) {
-      final batches = <List<String>>[];
-      for (
-        var i = start;
-        i < min(start + pageSize * 4, ids.length);
-        i += pageSize
-      ) {
-        batches.add(ids.sublist(i, min(i + pageSize, ids.length)));
-      }
-      final results = await Future.wait(
-        batches.map((batch) async {
+    Future<void> worker() async {
+      try {
+        while (next < ids.length && !failed) {
+          final start = next;
+          next += pageSize;
+          final batch = ids.sublist(start, min(start + pageSize, ids.length));
           final response = await dio.get<Map<String, dynamic>>(
             'https://api.ec.nintendo.com/v1/price',
             queryParameters: {
@@ -220,21 +238,25 @@ class NintendoGameRepository implements GameRepository {
           if (raw is! List || raw.any((e) => e is! Map)) {
             throw const FormatException('가격 응답 형식을 확인할 수 없습니다.');
           }
+          for (final entry in raw.cast<Map>()) {
+            prices[entry['title_id'].toString()] = Map<String, dynamic>.from(
+              entry,
+            );
+          }
           completed += batch.length;
           onProgress?.call(
             CatalogProgress('전체 게임 가격 확인 중', completed, ids.length),
           );
-          return raw;
-        }),
-      );
-      for (final result in results) {
-        for (final entry in result.cast<Map>()) {
-          prices[entry['title_id'].toString()] = Map<String, dynamic>.from(
-            entry,
-          );
         }
+      } on Object {
+        failed = true;
+        rethrow;
       }
     }
+
+    await Future.wait(
+      List.generate(min(4, (ids.length / pageSize).ceil()), (_) => worker()),
+    );
     final now = DateTime.now().toUtc();
     return games.map((game) => game.withPrice(prices[game.id], now)).toList();
   }

@@ -48,6 +48,9 @@ class GameItem {
     this.hardware = 'Nintendo Switch',
     this.popularityRank,
     this.sourceUrl,
+    this.publisher,
+    this.supportedLanguages = const [],
+    this.releaseUndecided = false,
   });
 
   final String id;
@@ -64,6 +67,26 @@ class GameItem {
   final String hardware;
   final int? popularityRank;
   final String? sourceUrl;
+  final String? publisher;
+  final List<String> supportedLanguages;
+  final bool releaseUndecided;
+  bool get supportsKorean => supportedLanguages.any(
+    (language) => ['korean', 'ko', '한국어'].contains(language.toLowerCase()),
+  );
+
+  bool upcomingAt(DateTime now) {
+    if (releaseUndecided) return true;
+    final release = releaseDate;
+    if (release == null) return false;
+    // Catalog release dates describe Korean calendar days, not launch instants.
+    final korea = now.toUtc().add(const Duration(hours: 9));
+    return DateTime.utc(
+      release.year,
+      release.month,
+      release.day,
+    ).isAfter(DateTime.utc(korea.year, korea.month, korea.day));
+  }
+
   String? get storeUrl =>
       isStoreId(id) ? 'https://store.nintendo.co.kr/$id' : null;
   String? get detailsUrl => storeUrl ?? catalogSourceUrl(sourceUrl);
@@ -121,6 +144,9 @@ class GameItem {
     hardware: hardware,
     popularityRank: popularityRank,
     sourceUrl: sourceUrl,
+    publisher: publisher,
+    supportedLanguages: supportedLanguages,
+    releaseUndecided: releaseUndecided,
   );
 
   GameItem withPopularityRank(int? rank) =>
@@ -150,6 +176,9 @@ class GameItem {
       hardware: hardware,
       popularityRank: popularityRank,
       sourceUrl: sourceUrl,
+      publisher: publisher,
+      supportedLanguages: supportedLanguages,
+      releaseUndecided: releaseUndecided,
     );
   }
 
@@ -176,6 +205,11 @@ class GameItem {
       releaseDate: parseDate(json['release_date_on_eshop']),
       hardware: json['hardware']?.toString() ?? 'Nintendo Switch',
       sourceUrl: catalogSourceUrl(json['sourceUrl']),
+      publisher: json['publisher'] as String?,
+      supportedLanguages:
+          (json['supportedLanguages'] as List?)?.whereType<String>().toList() ??
+          const [],
+      releaseUndecided: json['releaseUndecided'] == true,
     );
   }
 
@@ -196,6 +230,13 @@ class GameItem {
       'release_date_on_eshop':
           json['releaseDateDownload'] ?? json['releaseDate'],
       'sourceUrl': json['pageLinkCustom'],
+      'publisher': json['publisher'],
+      'supportedLanguages': json['supportedLanguages'],
+      'releaseUndecided':
+          json['releaseDateUndecided'] == true ||
+          (json['releaseDateUndecided'] is String &&
+              (json['releaseDateUndecided'] as String).trim().isNotEmpty &&
+              json['releaseDateUndecided'] != 'false'),
     });
     return metadata;
   }
@@ -215,6 +256,9 @@ class GameItem {
     'hardware': hardware,
     'popularityRank': popularityRank,
     'sourceUrl': sourceUrl,
+    'publisher': publisher,
+    'supportedLanguages': supportedLanguages,
+    'releaseUndecided': releaseUndecided,
   };
 
   factory GameItem.fromJson(Map<String, dynamic> json) => GameItem(
@@ -232,5 +276,10 @@ class GameItem {
     hardware: json['hardware']?.toString() ?? 'Nintendo Switch',
     popularityRank: (json['popularityRank'] as num?)?.toInt(),
     sourceUrl: catalogSourceUrl(json['sourceUrl']),
+    publisher: json['publisher'] as String?,
+    supportedLanguages: List<String>.from(
+      json['supportedLanguages'] as List? ?? [],
+    ),
+    releaseUndecided: json['releaseUndecided'] == true,
   );
 }
