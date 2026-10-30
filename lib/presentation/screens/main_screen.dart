@@ -447,6 +447,9 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                           .map(
                                             (sort) => DropdownMenuItem(
                                               value: sort,
+                                              enabled:
+                                                  sort != GameSort.popular ||
+                                                  !state.loading,
                                               child: Text(
                                                 sort.label,
                                                 style: const TextStyle(
