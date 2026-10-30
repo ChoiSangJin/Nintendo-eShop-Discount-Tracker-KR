@@ -4,6 +4,74 @@ import 'package:switch_sale_tracker/presentation/controllers/game_list_controlle
 import 'support/fakes.dart';
 
 void main() {
+  test('upcoming uses Korean calendar days and retains official metadata', () {
+    final game = GameItem.fromKoreanCatalog({
+      'nsuid': '70010000000001',
+      'title': '신작',
+      'releaseDate': '2026-10-31T00:00:00Z',
+      'publisher': '공식 배급사',
+      'supportedLanguages': ['Korean', 'English'],
+    });
+    expect(game.upcomingAt(DateTime.utc(2026, 10, 30, 14, 59)), isTrue);
+    expect(game.upcomingAt(DateTime.utc(2026, 10, 30, 15)), isFalse);
+    final restored = GameItem.fromJson(
+      game.withName('공식 신작').withPrice({
+        'regular_price': {'raw_value': '50000'},
+      }, DateTime.now()).toJson(),
+    );
+    expect(restored.publisher, '공식 배급사');
+    expect(restored.supportsKorean, isTrue);
+    expect(restored.supportedLanguages, ['Korean', 'English']);
+    final undecided = GameItem.fromKoreanCatalog({
+      'nsuid': 'catalog:upcoming',
+      'title': '미정 신작',
+      'releaseDateUndecided': true,
+    });
+    expect(undecided.upcomingAt(DateTime.utc(2026, 10, 30)), isTrue);
+    expect(undecided.supportsKorean, isFalse);
+    expect(GameItem.fromJson(undecided.toJson()).releaseUndecided, isTrue);
+    expect(exampleGame().upcomingAt(DateTime.now()), isFalse);
+  });
+
+  test(
+    'browse modes preserve regular-price and upcoming games without fetching',
+    () {
+      final now = DateTime.utc(2026, 10, 30);
+      final games = [
+        exampleGame(id: 'sale'),
+        exampleGame(id: 'cheap', discount: 3000),
+        exampleGame(id: 'regular', discount: null),
+        exampleGame(
+          id: 'soon',
+          discount: null,
+          releaseDate: DateTime.utc(2026, 11, 1),
+        ),
+        exampleGame(
+          id: 'later',
+          discount: null,
+          releaseDate: DateTime.utc(2027),
+        ),
+      ];
+      List<GameItem> browse(GameBrowse mode, {String query = ''}) =>
+          games.where((g) => matchesBrowse(g, mode, query, now)).toList();
+      expect(browse(GameBrowse.sales).map((g) => g.id), ['sale']);
+      expect(browse(GameBrowse.all), hasLength(5));
+      expect(browse(GameBrowse.sales, query: '게임'), hasLength(5));
+      final upcoming = browse(GameBrowse.upcoming, query: '게임');
+      expect(upcoming.map((g) => g.id), ['soon', 'later']);
+      expect(
+        filterAndSortGames(
+          upcoming.reversed,
+          genre: '전체',
+          query: '',
+          sort: GameSort.releaseSoon,
+          now: now,
+        ).map((g) => g.id),
+        ['soon', 'later'],
+      );
+    },
+  );
+
   test(
     'platform metadata keeps generations and editions distinct through storage',
     () {

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:dio/dio.dart';
 import 'package:switch_sale_tracker/data/datasources/korean_title_resolver.dart';
@@ -10,7 +11,9 @@ import 'package:switch_sale_tracker/presentation/controllers/game_list_controlle
 // Read-only live probe. Never use fixture or sample game data in this check.
 void main() {
   test(
-    'live official Korean catalog and KRW batch prices',
+    Platform.environment['LIVE_CATALOG_OUTPUT'] == null
+        ? 'live official Korean catalog and KRW batch prices'
+        : 'live verified Korean metadata snapshot without bundled prices',
     () async {
       final dio = Dio(
         BaseOptions(
@@ -18,8 +21,16 @@ void main() {
           receiveTimeout: const Duration(seconds: 30),
         ),
       );
+      var catalogRequests = 0;
+      var priceRequests = 0;
+      final elapsed = Stopwatch()..start();
       dio.interceptors.add(
         InterceptorsWrapper(
+          onRequest: (options, handler) {
+            if (options.uri.path == '/kr/api/software') catalogRequests++;
+            if (options.uri.path == '/v1/price') priceRequests++;
+            handler.next(options);
+          },
           onError: (error, handler) {
             stdout.writeln(
               'Official API failed: ${error.requestOptions.uri} (HTTP ${error.response?.statusCode})',
@@ -43,18 +54,28 @@ void main() {
         dio,
         KoreanTitleResolver(dio, _TitleStore()),
       );
+      final snapshotPath = Platform.environment['LIVE_CATALOG_OUTPUT'];
       try {
-        final games = await repository.fetchCatalog(
-          onProgress: (p) {
-            if (p.completed == p.total) {
-              stdout.writeln('${p.label}: ${p.completed}/${p.total}');
-            }
-          },
-        );
+        void progress(CatalogProgress p) {
+          if (p.completed == p.total) {
+            stdout.writeln('${p.label}: ${p.completed}/${p.total}');
+          }
+        }
+
+        final games = snapshotPath == null
+            ? await repository.fetchCatalog(onProgress: progress)
+            : await repository.fetchMetadata(onProgress: progress);
         final now = DateTime.now().toUtc();
+        final upcoming = games.where((g) => g.upcomingAt(now)).toList();
+        expect(upcoming, isNotEmpty);
+        expect(games.any((g) => g.supportsKorean), isTrue);
+        expect(games.any((g) => g.publisher?.isNotEmpty == true), isTrue);
+        stdout.writeln(
+          'Official collection: ${elapsed.elapsed.inMilliseconds} ms; $catalogRequests catalog requests, $priceRequests price requests; ${upcoming.length} upcoming games.',
+        );
         final sales = games.where((g) => g.saleActiveAt(now)).toList();
         expect(games.map((g) => g.id).toSet().length, games.length);
-        expect(sales, isNotEmpty);
+        if (snapshotPath == null) expect(sales, isNotEmpty);
         final persona = filterAndSortGames(
           games,
           genre: '전체',
@@ -77,10 +98,12 @@ void main() {
           sort: GameSort.discount,
           now: now,
         );
-        expect(
-          pokemon.any((g) => g.regularPrice != null && !g.saleActiveAt(now)),
-          isTrue,
-        );
+        if (snapshotPath == null) {
+          expect(
+            pokemon.any((g) => g.regularPrice != null && !g.saleActiveAt(now)),
+            isTrue,
+          );
+        }
         final verifiedIds = {
           '70010000053968',
           '70010000053973',
@@ -93,7 +116,7 @@ void main() {
         };
         expect(pokemon.map((g) => g.id), containsAll(verifiedIds));
         for (final game in pokemon.where((g) => verifiedIds.contains(g.id))) {
-          expect(game.regularPrice, isNotNull);
+          if (snapshotPath == null) expect(game.regularPrice, isNotNull);
           expect(game.storeUrl, isNotNull);
           stdout.writeln('${game.name}: ${game.priceAt(now)} KRW (${game.id})');
         }
@@ -143,8 +166,29 @@ void main() {
         final ranks = await repository.fetchPopularity();
         expect(games.any((g) => ranks.rankFor(g) != null), isTrue);
         stdout.writeln(
-          'Live complete KR catalog: ${games.length} unique products, ${metadataOnly.length} metadata-only records, ${sales.length} active discounts, ${persona.length} Persona matches, ${pokemon.length} Pokémon matches. Global discount/price/release order verified across every 20-item page.',
+          'Live complete KR catalog: ${games.length} unique products, ${metadataOnly.length} metadata-only records, ${snapshotPath == null ? '${sales.length} active discounts' : 'prices not bundled'}, ${persona.length} Persona matches, ${pokemon.length} Pokémon matches. ${snapshotPath == null ? 'Global sorting verified.' : 'Metadata coverage verified; prices require a separate live lookup.'}',
         );
+        if (snapshotPath != null) {
+          expect(priceRequests, 0);
+          expect(
+            games.every(
+              (g) =>
+                  g.regularPrice == null &&
+                  g.discountPrice == null &&
+                  g.priceCheckedAt == null,
+            ),
+            isTrue,
+          );
+          await File(snapshotPath).writeAsString(
+            jsonEncode({
+              'version': 1,
+              'product_count': games.length,
+              'catalog_at': now.toIso8601String(),
+              'prices_verified': false,
+              'games': games.map((g) => g.toJson()).toList(),
+            }),
+          );
+        }
         for (final g in persona) {
           stdout.writeln('${g.name}: ${g.priceAt(now)} KRW');
         }

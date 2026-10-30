@@ -31,7 +31,7 @@ void main() {
     },
   );
   test(
-    'only complete fresh caches skip collection; manual refresh always collects',
+    'only complete fresh caches skip collection; manual refresh checks prices',
     () async {
       final store = MemoryStore()
         ..games = [exampleGame()]
@@ -99,7 +99,9 @@ void main() {
         isTrue,
       );
       await controller.refresh();
-      expect(repo.metadataReuse, [true, false]);
+      expect(repo.metadataReuse, [true, true]);
+      await controller.refresh(fullCatalog: true);
+      expect(repo.metadataReuse, [true, true, false]);
       controller.dispose();
     },
   );

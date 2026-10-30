@@ -12,6 +12,129 @@ import 'package:switch_sale_tracker/presentation/widgets/page_navigation.dart';
 import 'support/fakes.dart';
 
 void main() {
+  testWidgets(
+    'metadata-only first launch opens all games while fetching prices without a barrier',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final store = MemoryStore()
+        ..games = [exampleGame(name: '기본 게임', regular: null, discount: null)]
+        ..catalogComplete = true
+        ..catalogFetchedAt = DateTime.now().toUtc();
+      final repo = FakeRepository()..pending = Completer();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            localStoreProvider.overrideWithValue(store),
+            gameRepositoryProvider.overrideWithValue(repo),
+          ],
+          child: const TrackerApp(),
+        ),
+      );
+      await tester.pump();
+      expect(repo.metadataReuse, [true]);
+      expect(
+        find.byKey(const ValueKey('global-loading-barrier')),
+        findsNothing,
+      );
+      expect(
+        tester
+            .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, '전체 게임'))
+            .selected,
+        isTrue,
+      );
+      expect(find.text('총 1개 · 1개 표시 · 1페이지'), findsOneWidget);
+      repo.pending!.complete([exampleGame(name: '기본 게임')]);
+      await tester.pumpAndSettle();
+      expect(find.text('₩25,000'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('complete cached games stay usable during a price refresh', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = MemoryStore();
+    await store.saveGames([
+      exampleGame(),
+    ], DateTime.now().subtract(const Duration(hours: 13)));
+    final repo = FakeRepository()..pending = Completer();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          localStoreProvider.overrideWithValue(store),
+          gameRepositoryProvider.overrideWithValue(repo),
+        ],
+        child: const TrackerApp(),
+      ),
+    );
+    await tester.pump();
+    expect(repo.metadataReuse, [true]);
+    expect(find.byKey(const ValueKey('global-loading-barrier')), findsNothing);
+    expect(tester.widget<PopScope>(find.byType(PopScope)).canPop, isTrue);
+    await tester.tap(find.text('전체 게임'));
+    await tester.pump();
+    await tester.tap(find.text('관심 게임'));
+    await tester.pump();
+    expect(find.text('마음에 담은 게임'), findsOneWidget);
+    repo.pending!.complete([exampleGame()]);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'all and upcoming discovery use the cached catalog without requests',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repo = FakeRepository()
+        ..games = [
+          exampleGame(name: '할인 게임'),
+          exampleGame(id: 'regular', name: '정가 게임', discount: null),
+          exampleGame(
+            id: 'upcoming',
+            name: '예정 게임',
+            discount: null,
+            releaseDate: DateTime.now().add(const Duration(days: 3)),
+          ),
+        ];
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            localStoreProvider.overrideWithValue(MemoryStore()),
+            gameRepositoryProvider.overrideWithValue(repo),
+          ],
+          child: const TrackerApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('총 1개 · 1개 표시 · 1페이지'), findsOneWidget);
+      await tester.tap(find.text('전체 게임'));
+      await tester.pumpAndSettle();
+      expect(find.text('총 3개 · 3개 표시 · 1페이지'), findsOneWidget);
+      await tester.tap(find.text('발매 예정'));
+      await tester.pumpAndSettle();
+      expect(find.text('총 1개 · 1개 표시 · 1페이지'), findsOneWidget);
+      expect(
+        tester.widget<GameCard>(find.byType(GameCard).first).game.name,
+        '예정 게임',
+      );
+      expect(repo.catalogCalls, 1);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   testWidgets('icon arrows and five page numbers stay on one line at 360px', (
     tester,
   ) async {

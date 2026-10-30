@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:switch_sale_tracker/data/datasources/korean_title_resolver.dart';
@@ -6,6 +7,83 @@ import 'package:switch_sale_tracker/data/repositories/game_repository.dart';
 import 'support/fakes.dart';
 
 void main() {
+  test(
+    'a denied price request stops queued work and never publishes partial prices',
+    () async {
+      final dio = Dio();
+      var requests = 0;
+      dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            requests++;
+            handler.reject(
+              DioException(
+                requestOptions: options,
+                response: Response(requestOptions: options, statusCode: 403),
+              ),
+            );
+          },
+        ),
+      );
+      final repo = NintendoGameRepository(
+        dio,
+        KoreanTitleResolver(dio, MemoryStore()),
+      );
+      await expectLater(
+        repo.refreshPrices(
+          List.generate(300, (i) => exampleGame(id: '${70010000000000 + i}')),
+        ),
+        throwsA(isA<DioException>()),
+      );
+      expect(requests, 1);
+      dio.close();
+    },
+  );
+
+  test(
+    'price workers fill free slots without waiting for a slow batch',
+    () async {
+      final dio = Dio();
+      RequestInterceptorHandler? slow;
+      RequestOptions? slowOptions;
+      final fifth = Completer<void>();
+      var requests = 0;
+      dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            requests++;
+            if (requests == 1) {
+              slow = handler;
+              slowOptions = options;
+              return;
+            }
+            if (requests == 5) fifth.complete();
+            handler.resolve(
+              Response(requestOptions: options, data: {'prices': []}),
+            );
+          },
+        ),
+      );
+      final repo = NintendoGameRepository(
+        dio,
+        KoreanTitleResolver(dio, MemoryStore()),
+      );
+      final result = repo.refreshPrices(
+        List.generate(150, (i) => exampleGame(id: '${70010000000000 + i}')),
+      );
+      try {
+        await fifth.future.timeout(const Duration(seconds: 2));
+        expect(requests, 5);
+      } finally {
+        slow?.resolve(
+          Response(requestOptions: slowOptions!, data: {'prices': []}),
+        );
+      }
+      expect(await result, hasLength(150));
+      dio.close();
+    },
+  );
+
   test(
     'complete collection recovers unstable boundaries, deduplicates IDs and bounds all requests',
     () async {
@@ -73,6 +151,9 @@ void main() {
       expect(games.map((g) => g.id).toSet(), hasLength(120));
       expect(games.any((g) => g.priceAt(DateTime.now()) == null), isTrue);
       expect(catalogCalls, containsAll([1, 2, 3, 4, 5, 6]));
+      expect(catalogCalls, contains(1.5));
+      // Only the damaged boundary is repaired instead of a full reverse scan.
+      expect(catalogCalls.length, lessThan(12));
       expect(priceCounts, [30, 30, 30, 29]);
       expect(maxActive, 4);
       expect(

@@ -38,10 +38,34 @@ enum GameSort {
   popular('인기순'),
   discount('높은 할인율순'),
   price('최저 가격순'),
-  newest('최신 출시순');
+  newest('최신 출시순'),
+  releaseSoon('발매 가까운순');
 
   const GameSort(this.label);
   final String label;
+}
+
+enum GameBrowse {
+  sales('할인'),
+  all('전체 게임'),
+  upcoming('발매 예정');
+
+  const GameBrowse(this.label);
+  final String label;
+}
+
+bool matchesBrowse(
+  GameItem game,
+  GameBrowse browse,
+  String query,
+  DateTime now,
+) {
+  if (browse == GameBrowse.upcoming) return game.upcomingAt(now);
+  if (browse == GameBrowse.all || query.trim().isNotEmpty) return true;
+  final price = game.priceAt(now);
+  return game.saleActiveAt(now) &&
+      price != null &&
+      (price < 1000 || price >= 5000);
 }
 
 class GameListState {
@@ -68,6 +92,8 @@ class GameListState {
   final String query;
   final CatalogProgress? progress;
   bool get busy => loading || loadingPopularity || savingFavorite;
+  bool get blocking =>
+      (loading && !complete) || loadingPopularity || savingFavorite;
   GameListState copyWith({
     List<GameItem>? games,
     Map<String, GameItem>? favorites,
@@ -152,10 +178,11 @@ class GameListController extends StateNotifier<GameListState> {
     }
   }
 
-  Future<void> refresh({bool force = true}) async {
+  Future<void> refresh({bool force = true, bool fullCatalog = false}) async {
     if (_refreshing || state.loadingPopularity || state.savingFavorite) return;
     final now = DateTime.now().toUtc();
     if (!force &&
+        !fullCatalog &&
         state.complete &&
         state.updatedAt != null &&
         now.difference(state.updatedAt!) >= Duration.zero &&
@@ -172,7 +199,7 @@ class GameListController extends StateNotifier<GameListState> {
     try {
       final catalogAt = _catalogAt ?? store.catalogFetchedAt;
       final reuseMetadata =
-          !force &&
+          !fullCatalog &&
           state.complete &&
           catalogAt != null &&
           now.difference(catalogAt) >= Duration.zero &&
@@ -222,6 +249,10 @@ class GameListController extends StateNotifier<GameListState> {
           cached: true,
           error: error is FormatException
               ? error.message
+              : error is DioException &&
+                    (error.response?.statusCode == 403 ||
+                        error.response?.statusCode == 429)
+              ? 'eShop이 요청을 제한했습니다. 저장된 목록을 표시합니다. 잠시 후 가격을 다시 갱신해 주세요.'
               : '전체 게임 정보를 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.',
         );
       }
@@ -278,7 +309,7 @@ class GameListController extends StateNotifier<GameListState> {
   }
 
   Future<void> toggleFavorite(GameItem game) async {
-    if (state.busy || _favoriteWrites.contains(game.id)) return;
+    if (state.blocking || _favoriteWrites.contains(game.id)) return;
     state = state.copyWith(savingFavorite: true);
     _favoriteWrites.add(game.id);
     final remove = state.favorites.containsKey(game.id);
@@ -359,6 +390,9 @@ List<GameItem> filterAndSortGames(
       ),
       GameSort.newest => (b.releaseDate ?? DateTime(1970)).compareTo(
         a.releaseDate ?? DateTime(1970),
+      ),
+      GameSort.releaseSoon => (a.releaseDate ?? DateTime(9999)).compareTo(
+        b.releaseDate ?? DateTime(9999),
       ),
     };
     if (result != 0) return result;
