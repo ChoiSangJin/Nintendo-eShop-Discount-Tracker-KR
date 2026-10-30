@@ -249,6 +249,10 @@ class GameListController extends StateNotifier<GameListState> {
           cached: true,
           error: error is FormatException
               ? error.message
+              : error is DioException &&
+                    (error.response?.statusCode == 403 ||
+                        error.response?.statusCode == 429)
+              ? 'eShop이 요청을 제한했습니다. 저장된 목록을 표시합니다. 잠시 후 가격을 다시 갱신해 주세요.'
               : '전체 게임 정보를 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.',
         );
       }

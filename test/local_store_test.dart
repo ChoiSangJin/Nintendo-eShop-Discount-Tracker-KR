@@ -1,10 +1,64 @@
 import 'dart:io';
+import 'dart:convert';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:switch_sale_tracker/data/datasources/local_store.dart';
 import 'support/fakes.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'verified bundled catalog seeds first launch without replacing a complete cache or favorites',
+    () async {
+      final dir = await Directory.systemTemp.createTemp('eshop-seed-test-');
+      Hive.init(dir.path);
+      final store = HiveLocalStore(
+        await Hive.openBox<dynamic>('seed-cache'),
+        await Hive.openBox<dynamic>('seed-favorites'),
+        await Hive.openBox<dynamic>('seed-titles'),
+      );
+      try {
+        final body = await rootBundle.loadString('assets/data/catalog.json');
+        final seed = jsonDecode(body) as Map<String, dynamic>;
+        await store.saveFavorite(exampleGame());
+        await store.seedCatalog();
+        expect(store.catalogComplete, isTrue);
+        expect(store.readGames().length, seed['product_count']);
+        expect(store.readGames().length, greaterThan(4000));
+        expect(store.cachedAt, isNull);
+        expect(
+          store.readGames().every(
+            (g) =>
+                g.priceCheckedAt == null &&
+                g.regularPrice == null &&
+                g.discountPrice == null,
+          ),
+          isTrue,
+        );
+        expect(
+          store.catalogFetchedAt,
+          DateTime.parse(seed['catalog_at'] as String),
+        );
+        expect(store.readFavorites(), hasLength(1));
+        final existingAt = DateTime.utc(2026, 1, 1);
+        await store.saveGames([exampleGame(name: '기존 전체 목록')], existingAt);
+        await store.seedCatalog();
+        expect(store.readGames().single.name, '기존 전체 목록');
+        expect(store.cachedAt, existingAt);
+        await store.cache.clear();
+        await store.seedCatalog(
+          bundle: _SeedBundle(jsonEncode({...seed, 'product_count': 0})),
+        );
+        expect(store.catalogComplete, isFalse);
+        expect(store.readFavorites(), hasLength(1));
+      } finally {
+        await Hive.close();
+        await dir.delete(recursive: true);
+      }
+    },
+  );
+
   test(
     'Hive persists wishlist, game cache and Korean titles across reopening',
     () async {
@@ -61,4 +115,12 @@ void main() {
       }
     },
   );
+}
+
+class _SeedBundle extends CachingAssetBundle {
+  _SeedBundle(this.body);
+  final String body;
+  @override
+  Future<ByteData> load(String key) async =>
+      ByteData.sublistView(Uint8List.fromList(utf8.encode(body)));
 }

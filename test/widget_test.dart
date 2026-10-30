@@ -12,6 +12,48 @@ import 'package:switch_sale_tracker/presentation/widgets/page_navigation.dart';
 import 'support/fakes.dart';
 
 void main() {
+  testWidgets(
+    'metadata-only first launch opens all games while fetching prices without a barrier',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final store = MemoryStore()
+        ..games = [exampleGame(name: '기본 게임', regular: null, discount: null)]
+        ..catalogComplete = true
+        ..catalogFetchedAt = DateTime.now().toUtc();
+      final repo = FakeRepository()..pending = Completer();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            localStoreProvider.overrideWithValue(store),
+            gameRepositoryProvider.overrideWithValue(repo),
+          ],
+          child: const TrackerApp(),
+        ),
+      );
+      await tester.pump();
+      expect(repo.metadataReuse, [true]);
+      expect(
+        find.byKey(const ValueKey('global-loading-barrier')),
+        findsNothing,
+      );
+      expect(
+        tester
+            .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, '전체 게임'))
+            .selected,
+        isTrue,
+      );
+      expect(find.text('총 1개 · 1개 표시 · 1페이지'), findsOneWidget);
+      repo.pending!.complete([exampleGame(name: '기본 게임')]);
+      await tester.pumpAndSettle();
+      expect(find.text('₩25,000'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   testWidgets('complete cached games stay usable during a price refresh', (
     tester,
   ) async {

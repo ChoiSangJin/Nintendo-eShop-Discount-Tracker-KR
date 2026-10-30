@@ -82,6 +82,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
   @override
   void initState() {
     super.initState();
+    final initial = ref.read(gameListProvider);
+    if (initial.complete && initial.updatedAt == null) _browse = GameBrowse.all;
     WidgetsBinding.instance.addObserver(this);
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
@@ -503,7 +505,11 @@ class _MainScreenState extends ConsumerState<MainScreen>
                             if (state.cached && state.games.isNotEmpty)
                               SliverToBoxAdapter(
                                 child: _notice(
-                                  '${state.complete ? '저장된 전체 조회 결과' : '이전 버전의 일부 조회 결과 · 전체 목록 갱신 필요'}${state.updatedAt == null ? '' : ' · ${koreanDate(state.updatedAt!)}'}',
+                                  '${state.complete
+                                      ? state.updatedAt == null
+                                            ? '기본 게임 목록 · 가격 갱신 필요'
+                                            : '저장된 전체 조회 결과'
+                                      : '이전 버전의 일부 조회 결과 · 전체 목록 갱신 필요'}${state.updatedAt == null ? '' : ' · ${koreanDate(state.updatedAt!)}'}',
                                   icon: Icons.history_rounded,
                                 ),
                               ),

@@ -29,9 +29,23 @@ abstract class GameRepository {
 }
 
 class NintendoGameRepository implements GameRepository {
-  NintendoGameRepository(this.dio, this.titles);
+  NintendoGameRepository(
+    this.dio,
+    this.titles, {
+    this.priceRequestInterval = const Duration(milliseconds: 250),
+  });
   final Dio dio;
   final KoreanTitleResolver titles;
+  final Duration priceRequestInterval;
+  DateTime _nextPriceRequest = DateTime.fromMillisecondsSinceEpoch(0);
+
+  Future<void> _waitForPriceSlot() async {
+    final now = DateTime.now();
+    final slot = _nextPriceRequest.isAfter(now) ? _nextPriceRequest : now;
+    _nextPriceRequest = slot.add(priceRequestInterval);
+    if (slot.isAfter(now)) await Future<void>.delayed(slot.difference(now));
+  }
+
   static const pageSize = 30;
   static const catalogPageSize = 24;
   @override
@@ -42,6 +56,13 @@ class NintendoGameRepository implements GameRepository {
     if (metadata != null && metadata.isNotEmpty) {
       return refreshPrices(metadata, onProgress: onProgress);
     }
+    return refreshPrices(
+      await fetchMetadata(onProgress: onProgress),
+      onProgress: onProgress,
+    );
+  }
+
+  Future<List<GameItem>> fetchMetadata({ProgressCallback? onProgress}) async {
     Future<Map<String, dynamic>> page(num number, {bool oldest = false}) async {
       final response = await dio.get<Map<String, dynamic>>(
         'https://www.nintendo.com/kr/api/software',
@@ -116,7 +137,7 @@ class NintendoGameRepository implements GameRepository {
     await scan(List.generate(pages - 1, (i) => i + 2), finishEarly: false);
     // Repair the boundaries that actually overlapped before rescanning the
     // entire catalog in reverse. Keep the full coverage checks below.
-    if (records.length < total) {
+    if (records.length < total && boundaryPages.length <= 4) {
       final repairs = {
         for (final number in boundaryPages)
           for (final shift in [-0.5, 0.5])
@@ -163,7 +184,7 @@ class NintendoGameRepository implements GameRepository {
       }
     }
     if (games.isEmpty) throw const FormatException('유효한 게임 목록이 없습니다.');
-    return refreshPrices(games.values.toList(), onProgress: onProgress);
+    return games.values.toList();
   }
 
   @override
@@ -226,6 +247,8 @@ class NintendoGameRepository implements GameRepository {
           final start = next;
           next += pageSize;
           final batch = ids.sublist(start, min(start + pageSize, ids.length));
+          await _waitForPriceSlot();
+          if (failed) return;
           final response = await dio.get<Map<String, dynamic>>(
             'https://api.ec.nintendo.com/v1/price',
             queryParameters: {

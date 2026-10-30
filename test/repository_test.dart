@@ -8,6 +8,39 @@ import 'support/fakes.dart';
 
 void main() {
   test(
+    'a denied price request stops queued work and never publishes partial prices',
+    () async {
+      final dio = Dio();
+      var requests = 0;
+      dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            requests++;
+            handler.reject(
+              DioException(
+                requestOptions: options,
+                response: Response(requestOptions: options, statusCode: 403),
+              ),
+            );
+          },
+        ),
+      );
+      final repo = NintendoGameRepository(
+        dio,
+        KoreanTitleResolver(dio, MemoryStore()),
+      );
+      await expectLater(
+        repo.refreshPrices(
+          List.generate(300, (i) => exampleGame(id: '${70010000000000 + i}')),
+        ),
+        throwsA(isA<DioException>()),
+      );
+      expect(requests, 1);
+      dio.close();
+    },
+  );
+
+  test(
     'price workers fill free slots without waiting for a slow batch',
     () async {
       final dio = Dio();

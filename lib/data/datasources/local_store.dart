@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../domain/models/game_item.dart';
 
@@ -26,11 +28,53 @@ class HiveLocalStore implements LocalStore {
 
   static Future<HiveLocalStore> open() async {
     await Hive.initFlutter();
-    return HiveLocalStore(
+    final store = HiveLocalStore(
       await Hive.openBox<dynamic>('sales_cache_v1'),
       await Hive.openBox<dynamic>('favorites_v1'),
       await Hive.openBox<dynamic>('korean_titles_v1'),
     );
+    await store.seedCatalog();
+    return store;
+  }
+
+  /// Only the live-verified release snapshot can seed a missing/partial cache.
+  /// Preserve its original timestamps and never overwrite a complete user cache.
+  Future<void> seedCatalog({AssetBundle? bundle}) async {
+    if (catalogComplete) return;
+    try {
+      final data = jsonDecode(
+        await (bundle ?? rootBundle).loadString('assets/data/catalog.json'),
+      );
+      if (data is! Map ||
+          data['version'] != 1 ||
+          data['prices_verified'] != false ||
+          data['games'] is! List) {
+        return;
+      }
+      final raw = data['games'] as List;
+      final games = _decode(raw);
+      final catalogAt = parseDate(data['catalog_at']);
+      if (catalogAt == null ||
+          games.isEmpty ||
+          raw.length != data['product_count'] ||
+          games.length != raw.length ||
+          games.map((g) => g.id).toSet().length != raw.length ||
+          games.any(
+            (g) =>
+                g.priceCheckedAt != null ||
+                g.regularPrice != null ||
+                g.discountPrice != null,
+          )) {
+        return;
+      }
+      await cache.put('catalog_snapshot_v3', {
+        'games': raw,
+        'metadata_only': true,
+        'catalog_at': catalogAt.toIso8601String(),
+      });
+    } on Object {
+      // Asset or storage failures must still allow a normal live collection.
+    }
   }
 
   List<GameItem> _decode(Iterable<dynamic> values) {
@@ -77,11 +121,22 @@ class HiveLocalStore implements LocalStore {
   @override
   bool get catalogComplete {
     final snapshot = cache.get('catalog_snapshot_v3');
-    if (snapshot is! Map || snapshot['games'] is! List || cachedAt == null) {
+    if (snapshot is! Map || snapshot['games'] is! List) {
       return false;
     }
     final raw = snapshot['games'] as List;
     final decoded = _decode(raw);
+    if (cachedAt == null &&
+        !(snapshot['metadata_only'] == true &&
+            catalogFetchedAt != null &&
+            decoded.every(
+              (g) =>
+                  g.priceCheckedAt == null &&
+                  g.regularPrice == null &&
+                  g.discountPrice == null,
+            ))) {
+      return false;
+    }
     return raw.isNotEmpty &&
         decoded.length == raw.length &&
         decoded.map((g) => g.id).toSet().length == raw.length;
