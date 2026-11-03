@@ -66,7 +66,7 @@ python3 tool/create_signing_key.py
 bash tool/build_release.sh
 ```
 
-빌드 스크립트는 분석·테스트 후 `flutter build apk --release --target-platform android-arm64 --split-per-abi`를 실행합니다. 디버그 키로 릴리스를 서명하지 않으며, 네이티브 ABI·APK 서명을 검사하고 SHA-256 파일을 생성합니다. 결과는 `dist/switch-sale-tracker-kr-arm64-v1.4.1.apk`와 `.apk.sha256`입니다. 기존 1.0.0·1.1.0·1.2.0·1.2.1·1.3.0·1.3.1·1.3.2·1.3.3·1.3.4·1.3.5·1.4.0과 같은 키로 서명하고 버전 코드를 올려 찜·캐시를 유지한 업데이트 설치를 지원합니다. 다른 CPU용 라이브러리가 없어 범용 APK보다 작습니다. 32비트 전용 기기·x86 에뮬레이터에서는 설치할 수 없습니다.
+빌드 스크립트는 분석·테스트 후 `flutter build apk --release --target-platform android-arm64 --split-per-abi`를 실행합니다. 디버그 키로 릴리스를 서명하지 않으며, 네이티브 ABI·APK 서명을 검사하고 SHA-256 파일을 생성합니다. 결과는 `dist/switch-sale-tracker-kr-arm64-v1.4.2.apk`와 `.apk.sha256`입니다. 기존 1.0.0·1.1.0·1.2.0·1.2.1·1.3.0·1.3.1·1.3.2·1.3.3·1.3.4·1.3.5·1.4.0·1.4.1과 같은 키로 서명하고 버전 코드를 올려 찜·캐시를 유지한 업데이트 설치를 지원합니다. 다른 CPU용 라이브러리가 없어 범용 APK보다 작습니다. 32비트 전용 기기·x86 에뮬레이터에서는 설치할 수 없습니다.
 
 CI는 PR·main에서 분석·테스트합니다. 수동 실행하는 `release.yml`을 사용하려면 저장소 **Settings → Secrets and variables → Actions**에 동일 릴리스 키의 다음 값을 안전하게 등록해야 합니다.
 
