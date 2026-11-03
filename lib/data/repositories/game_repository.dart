@@ -16,6 +16,13 @@ class CatalogProgress {
 
 typedef ProgressCallback = void Function(CatalogProgress progress);
 
+/// Identifies a failed metadata collection without disguising price failures.
+class CatalogMetadataException extends FormatException {
+  CatalogMetadataException(this.cause)
+    : super(cause is FormatException ? cause.message : '새 게임 목록을 갱신하지 못했습니다.');
+  final Exception cause;
+}
+
 abstract class GameRepository {
   Future<List<GameItem>> fetchCatalog({
     List<GameItem>? metadata,
@@ -56,10 +63,13 @@ class NintendoGameRepository implements GameRepository {
     if (metadata != null && metadata.isNotEmpty) {
       return refreshPrices(metadata, onProgress: onProgress);
     }
-    return refreshPrices(
-      await fetchMetadata(onProgress: onProgress),
-      onProgress: onProgress,
-    );
+    final List<GameItem> games;
+    try {
+      games = await fetchMetadata(onProgress: onProgress);
+    } on Exception catch (error, stack) {
+      Error.throwWithStackTrace(CatalogMetadataException(error), stack);
+    }
+    return refreshPrices(games, onProgress: onProgress);
   }
 
   Future<List<GameItem>> fetchMetadata({ProgressCallback? onProgress}) async {

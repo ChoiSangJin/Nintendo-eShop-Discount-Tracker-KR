@@ -38,6 +38,8 @@ class MemoryStore implements LocalStore {
   @override
   DateTime? catalogFetchedAt;
   @override
+  bool catalogRefreshFailed = false;
+  @override
   List<GameItem> readGames() => games;
   @override
   List<GameItem> readFavorites() => favorites.values.toList();
@@ -46,12 +48,14 @@ class MemoryStore implements LocalStore {
     List<GameItem> games,
     DateTime at, {
     DateTime? catalogAt,
+    bool catalogRefreshFailed = false,
   }) async {
     if (failWrites) throw StateError('Storage full');
     this.games = games;
     catalogComplete = true;
     cachedAt = at;
     catalogFetchedAt = catalogAt ?? at;
+    this.catalogRefreshFailed = catalogRefreshFailed;
   }
 
   @override
@@ -79,6 +83,8 @@ class FakeRepository implements GameRepository {
   int catalogCalls = 0;
   final metadataReuse = <bool>[];
   Object? failure;
+  Exception? catalogFailure;
+  Object? priceFailure;
   List<GameItem> refreshed = [];
   Map<String, int> popularity = {};
   Completer<List<GameItem>>? pending;
@@ -91,6 +97,7 @@ class FakeRepository implements GameRepository {
     catalogCalls++;
     metadataReuse.add(metadata != null);
     progress = onProgress;
+    if (catalogFailure != null) throw catalogFailure!;
     if (failure != null) throw failure!;
     return pending == null ? games : pending!.future;
   }
@@ -107,6 +114,7 @@ class FakeRepository implements GameRepository {
     ProgressCallback? onProgress,
   }) async {
     refreshed = games;
+    if (priceFailure != null) throw priceFailure!;
     if (failure != null) throw failure!;
     return games
         .map(

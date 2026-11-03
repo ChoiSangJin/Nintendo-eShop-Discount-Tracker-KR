@@ -6,6 +6,148 @@ import 'support/fakes.dart';
 
 void main() {
   test(
+    'metadata failure refreshes prices on the old verified catalog and preserves its date across restart',
+    () async {
+      final store = MemoryStore();
+      final catalogAt = DateTime.now().toUtc().subtract(
+        const Duration(days: 4),
+      );
+      final priceAt = catalogAt.add(const Duration(hours: 1));
+      await store.saveGames(
+        [exampleGame(name: '검증된 이전 목록')],
+        priceAt,
+        catalogAt: catalogAt,
+      );
+      final repo = FakeRepository()
+        ..catalogFailure = CatalogMetadataException(
+          const FormatException('목록 1개 누락'),
+        );
+      final controller = GameListController(repo, store);
+      await controller.refresh(force: false);
+      expect(repo.metadataReuse, [false]);
+      expect(repo.refreshed.single.name, '검증된 이전 목록');
+      expect(controller.state.games.single.name, '검증된 이전 목록');
+      expect(controller.state.games.single.discountPrice, 20000);
+      expect(controller.state.catalogRefreshFailed, isTrue);
+      expect(controller.state.error, isNull);
+      expect(controller.state.cached, isFalse);
+      expect(controller.state.busy, isFalse);
+      expect(store.catalogFetchedAt, catalogAt);
+      expect(store.cachedAt!.isAfter(priceAt), isTrue);
+      expect(store.catalogRefreshFailed, isTrue);
+      controller.dispose();
+      final restored = GameListController(repo, store);
+      await restored.refresh(force: false);
+      expect(
+        repo.catalogCalls,
+        1,
+      ); // Fresh prices need no repeat of the failed scan.
+      expect(restored.state.catalogRefreshFailed, isTrue);
+      repo.catalogFailure = null;
+      await restored.refresh();
+      expect(repo.metadataReuse, [false, true]);
+      expect(store.catalogFetchedAt, catalogAt);
+      expect(store.catalogRefreshFailed, isTrue);
+      repo.games = [exampleGame(), exampleGame(id: 'new')];
+      await restored.refresh(fullCatalog: true);
+      expect(restored.state.games, hasLength(2));
+      expect(store.catalogRefreshFailed, isFalse);
+      expect(store.catalogFetchedAt!.isAfter(catalogAt), isTrue);
+      restored.dispose();
+    },
+  );
+
+  test(
+    'verified metadata-only seed can recover its first prices after metadata failure',
+    () async {
+      final catalogAt = DateTime.now().toUtc().subtract(
+        const Duration(days: 4),
+      );
+      final store = MemoryStore()
+        ..games = [exampleGame(regular: null, discount: null)]
+        ..catalogComplete = true
+        ..catalogFetchedAt = catalogAt;
+      final repo = FakeRepository()
+        ..catalogFailure = CatalogMetadataException(
+          const FormatException('목록 누락'),
+        );
+      final controller = GameListController(repo, store);
+      await controller.refresh(force: false);
+      expect(controller.state.games.single.discountPrice, 20000);
+      expect(controller.state.error, isNull);
+      expect(store.cachedAt, isNotNull);
+      expect(store.catalogFetchedAt, catalogAt);
+      expect(store.catalogRefreshFailed, isTrue);
+      controller.dispose();
+    },
+  );
+
+  test(
+    'price failure after metadata recovery leaves saved games and both timestamps unchanged',
+    () async {
+      final store = MemoryStore();
+      final at = DateTime.now().toUtc().subtract(const Duration(days: 4));
+      await store.saveGames([exampleGame()], at);
+      final repo = FakeRepository()
+        ..catalogFailure = CatalogMetadataException(
+          const FormatException('목록 누락'),
+        )
+        ..priceFailure = StateError('가격 실패');
+      final controller = GameListController(repo, store);
+      await controller.refresh(fullCatalog: true);
+      expect(repo.refreshed, hasLength(1));
+      expect(controller.state.error, isNotNull);
+      expect(controller.state.cached, isTrue);
+      expect(controller.state.games.single.discountPrice, 25000);
+      expect(store.games.single.discountPrice, 25000);
+      expect(store.cachedAt, at);
+      expect(store.catalogFetchedAt, at);
+      expect(store.catalogRefreshFailed, isFalse);
+      controller.dispose();
+    },
+  );
+
+  test(
+    'partial, empty or undated caches cannot replace a failed full collection',
+    () async {
+      for (final store in [
+        MemoryStore(),
+        MemoryStore()..games = [exampleGame()],
+        MemoryStore()
+          ..games = [exampleGame()]
+          ..catalogComplete = true,
+      ]) {
+        final repo = FakeRepository()
+          ..catalogFailure = CatalogMetadataException(
+            const FormatException('목록 누락'),
+          );
+        final controller = GameListController(repo, store);
+        await controller.refresh(fullCatalog: true);
+        expect(repo.refreshed, isEmpty);
+        expect(controller.state.error, isNotNull);
+        expect(store.cachedAt, isNull);
+        controller.dispose();
+      }
+    },
+  );
+
+  test(
+    'explicit price refresh reuses old verified metadata without pretending the catalog is fresh',
+    () async {
+      final store = MemoryStore();
+      final at = DateTime.now().toUtc().subtract(const Duration(days: 4));
+      await store.saveGames([exampleGame()], at);
+      final repo = FakeRepository();
+      final controller = GameListController(repo, store);
+      await controller.refresh();
+      expect(repo.metadataReuse, [true]);
+      expect(store.catalogFetchedAt, at);
+      expect(store.catalogRefreshFailed, isFalse);
+      controller.dispose();
+    },
+  );
+
+  test(
     'old US ranks are discarded, Korean provenance survives restart and price refresh',
     () async {
       final store = MemoryStore();
