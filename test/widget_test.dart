@@ -37,7 +37,10 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('새 게임 목록을 갱신하지 못해 이전 전체 목록을 사용합니다.'), findsOneWidget);
+      expect(
+        find.text('일부 게임 목록 미확인 · 확인된 신규·변경 정보는 반영하고 기존 게임은 유지합니다.'),
+        findsOneWidget,
+      );
       expect(find.text('₩20,000'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('global-loading-barrier')),
@@ -47,7 +50,10 @@ void main() {
       await tester.tap(find.text('재시도'));
       await tester.pumpAndSettle();
       expect(repo.metadataReuse, [false, false]);
-      expect(find.text('새 게임 목록을 갱신하지 못해 이전 전체 목록을 사용합니다.'), findsNothing);
+      expect(
+        find.text('일부 게임 목록 미확인 · 확인된 신규·변경 정보는 반영하고 기존 게임은 유지합니다.'),
+        findsNothing,
+      );
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },

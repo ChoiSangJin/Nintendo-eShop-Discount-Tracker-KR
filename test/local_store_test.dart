@@ -52,6 +52,26 @@ void main() {
         );
         expect(store.catalogComplete, isFalse);
         expect(store.readFavorites(), hasLength(1));
+        final checked = DateTime.utc(2026, 11, 3);
+        await store.saveGames(
+          [exampleGame(name: '부분 수집된 신규 게임').withPrice(null, checked)],
+          null,
+          catalogCheckedAt: checked,
+          catalogRefreshFailed: true,
+        );
+        await Hive.close();
+        final reopened = HiveLocalStore(
+          await Hive.openBox<dynamic>('seed-cache'),
+          await Hive.openBox<dynamic>('seed-favorites'),
+          await Hive.openBox<dynamic>('seed-titles'),
+        );
+        expect(reopened.catalogComplete, isTrue);
+        expect(reopened.catalogFetchedAt, isNull);
+        expect(reopened.cachedAt, isNull);
+        expect(reopened.catalogCheckedAt, checked);
+        expect(reopened.catalogRefreshFailed, isTrue);
+        await reopened.seedCatalog();
+        expect(reopened.readGames().single.name, '부분 수집된 신규 게임');
       } finally {
         await Hive.close();
         await dir.delete(recursive: true);

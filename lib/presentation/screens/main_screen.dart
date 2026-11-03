@@ -196,7 +196,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                       onPressed: () => showAboutDialog(
                         context: context,
                         applicationName: 'Switch 할인 트래커 KR',
-                        applicationVersion: '1.4.2',
+                        applicationVersion: '1.4.3',
                         applicationIcon: const Icon(
                           Icons.sports_esports_rounded,
                           color: Color(0xffe60012),
@@ -510,21 +510,28 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                   ],
                                 ),
                               ),
-                            if (state.cached && state.games.isNotEmpty)
+                            if (state.games.isNotEmpty)
                               SliverToBoxAdapter(
                                 child: _notice(
                                   '${state.complete
                                       ? state.updatedAt == null
                                             ? '기본 게임 목록 · 가격 갱신 필요'
-                                            : '저장된 전체 조회 결과'
+                                            : '마지막 전체 가격 조회'
                                       : '이전 버전의 일부 조회 결과 · 전체 목록 갱신 필요'}${state.updatedAt == null ? '' : ' · ${koreanDate(state.updatedAt!)}'}',
                                   icon: Icons.history_rounded,
+                                ),
+                              ),
+                            if (state.catalogCheckedAt != null)
+                              SliverToBoxAdapter(
+                                child: _notice(
+                                  '목록 확인 시도 · ${koreanDate(state.catalogCheckedAt!)}${state.catalogRefreshFailed ? ' · 일부 미확인' : ''}',
+                                  icon: Icons.update_rounded,
                                 ),
                               ),
                             if (state.catalogRefreshFailed)
                               SliverToBoxAdapter(
                                 child: _notice(
-                                  '새 게임 목록을 갱신하지 못해 이전 전체 목록을 사용합니다.',
+                                  '일부 게임 목록 미확인 · 확인된 신규·변경 정보는 반영하고 기존 게임은 유지합니다.',
                                   action: () =>
                                       unawaited(_refresh(fullCatalog: true)),
                                   icon: Icons.info_outline_rounded,
