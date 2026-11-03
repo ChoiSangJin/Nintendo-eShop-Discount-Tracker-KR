@@ -75,6 +75,7 @@ class GameListState {
     this.loading = true,
     this.cached = true,
     this.complete = false,
+    this.catalogRefreshFailed = false,
     this.updatedAt,
     this.error,
     this.storageError,
@@ -87,6 +88,7 @@ class GameListState {
   final List<GameItem> games;
   final Map<String, GameItem> favorites;
   final bool loading, cached, complete, loadingPopularity, savingFavorite;
+  final bool catalogRefreshFailed;
   final DateTime? updatedAt;
   final String? error, storageError, popularityError;
   final String query;
@@ -112,6 +114,7 @@ class GameListState {
     bool? loading,
     bool? cached,
     bool? complete,
+    bool? catalogRefreshFailed,
     DateTime? updatedAt,
     String? error,
     bool clearError = false,
@@ -129,6 +132,7 @@ class GameListState {
     loading: loading ?? this.loading,
     cached: cached ?? this.cached,
     complete: complete ?? this.complete,
+    catalogRefreshFailed: catalogRefreshFailed ?? this.catalogRefreshFailed,
     updatedAt: updatedAt ?? this.updatedAt,
     error: clearError ? null : error ?? this.error,
     storageError: clearStorageError ? null : storageError ?? this.storageError,
@@ -148,6 +152,7 @@ class GameListController extends StateNotifier<GameListState> {
         GameListState(
           games: store.readGames().map(_koreanRanksOnly).toList(),
           complete: store.catalogComplete,
+          catalogRefreshFailed: store.catalogRefreshFailed,
           favorites: {
             for (final g in store.readFavorites()) g.id: _koreanRanksOnly(g),
           },
@@ -220,18 +225,40 @@ class GameListController extends StateNotifier<GameListState> {
     );
     try {
       final catalogAt = _catalogAt ?? store.catalogFetchedAt;
-      final reuseMetadata =
+      var reuseMetadata =
           !fullCatalog &&
           state.complete &&
+          state.games.isNotEmpty &&
           catalogAt != null &&
           now.difference(catalogAt) >= Duration.zero &&
-          now.difference(catalogAt) < const Duration(hours: 24);
-      final games = await repository.fetchCatalog(
-        metadata: reuseMetadata ? state.games : null,
-        onProgress: (progress) {
-          if (mounted) state = state.copyWith(progress: progress);
-        },
-      );
+          (force || now.difference(catalogAt) < const Duration(hours: 24));
+      void progress(CatalogProgress progress) {
+        if (mounted) state = state.copyWith(progress: progress);
+      }
+
+      List<GameItem> games;
+      try {
+        games = await repository.fetchCatalog(
+          metadata: reuseMetadata ? state.games : null,
+          onProgress: progress,
+        );
+      } on CatalogMetadataException {
+        if (!mounted ||
+            !state.complete ||
+            state.games.isEmpty ||
+            catalogAt == null ||
+            now.isBefore(catalogAt)) {
+          rethrow;
+        }
+        // Keep the previously verified full catalog and its original date.
+        // Never publish the incomplete collection as the new catalog.
+        reuseMetadata = true;
+        state = state.copyWith(catalogRefreshFailed: true);
+        games = await repository.refreshPrices(
+          state.games,
+          onProgress: progress,
+        );
+      }
       if (!mounted) return;
       if (games.isEmpty) throw const FormatException('전체 목록이 비어 있습니다.');
       _catalogAt = reuseMetadata ? catalogAt : DateTime.now().toUtc();
@@ -251,6 +278,9 @@ class GameListController extends StateNotifier<GameListState> {
         complete: true,
         cached: false,
         updatedAt: DateTime.now().toUtc(),
+        catalogRefreshFailed: reuseMetadata
+            ? state.catalogRefreshFailed
+            : false,
       );
       await _saveCache();
       await _syncFavorites(ranked);
@@ -296,6 +326,7 @@ class GameListController extends StateNotifier<GameListState> {
         state.games,
         state.updatedAt!,
         catalogAt: _catalogAt ?? store.catalogFetchedAt,
+        catalogRefreshFailed: state.catalogRefreshFailed,
       );
     } on Object {
       if (mounted) {

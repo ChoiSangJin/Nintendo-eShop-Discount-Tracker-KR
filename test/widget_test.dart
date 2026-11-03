@@ -13,6 +13,47 @@ import 'support/fakes.dart';
 
 void main() {
   testWidgets(
+    'metadata warning keeps updated prices visible and retries the whole catalog',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final store = MemoryStore();
+      await store.saveGames([
+        exampleGame(),
+      ], DateTime.now().subtract(const Duration(days: 4)));
+      final repo = FakeRepository()
+        ..catalogFailure = CatalogMetadataException(
+          const FormatException('목록 누락'),
+        );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            localStoreProvider.overrideWithValue(store),
+            gameRepositoryProvider.overrideWithValue(repo),
+          ],
+          child: const TrackerApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('새 게임 목록을 갱신하지 못해 이전 전체 목록을 사용합니다.'), findsOneWidget);
+      expect(find.text('₩20,000'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('global-loading-barrier')),
+        findsNothing,
+      );
+      repo.catalogFailure = null;
+      await tester.tap(find.text('재시도'));
+      await tester.pumpAndSettle();
+      expect(repo.metadataReuse, [false, false]);
+      expect(find.text('새 게임 목록을 갱신하지 못해 이전 전체 목록을 사용합니다.'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
     'metadata-only first launch opens all games while fetching prices without a barrier',
     (tester) async {
       tester.view.physicalSize = const Size(430, 1200);

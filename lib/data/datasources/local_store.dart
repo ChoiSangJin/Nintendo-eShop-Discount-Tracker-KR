@@ -9,10 +9,12 @@ abstract class LocalStore {
   bool get catalogComplete;
   DateTime? get cachedAt;
   DateTime? get catalogFetchedAt;
+  bool get catalogRefreshFailed;
   Future<void> saveGames(
     List<GameItem> games,
     DateTime at, {
     DateTime? catalogAt,
+    bool catalogRefreshFailed = false,
   });
   Future<void> saveFavorite(GameItem game);
   Future<void> removeFavorite(String id);
@@ -119,6 +121,12 @@ class HiveLocalStore implements LocalStore {
   }
 
   @override
+  bool get catalogRefreshFailed {
+    final snapshot = cache.get('catalog_snapshot_v3');
+    return snapshot is Map && snapshot['catalog_refresh_failed'] == true;
+  }
+
+  @override
   bool get catalogComplete {
     final snapshot = cache.get('catalog_snapshot_v3');
     if (snapshot is! Map || snapshot['games'] is! List) {
@@ -147,10 +155,12 @@ class HiveLocalStore implements LocalStore {
     List<GameItem> games,
     DateTime at, {
     DateTime? catalogAt,
+    bool catalogRefreshFailed = false,
   }) => cache.put('catalog_snapshot_v3', {
     'games': games.map((g) => g.toJson()).toList(),
     'updated_at': at.toIso8601String(),
     'catalog_at': (catalogAt ?? at).toIso8601String(),
+    'catalog_refresh_failed': catalogRefreshFailed,
   });
   @override
   Future<void> saveFavorite(GameItem game) =>

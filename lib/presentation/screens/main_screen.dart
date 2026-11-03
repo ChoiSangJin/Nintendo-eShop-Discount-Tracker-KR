@@ -521,6 +521,15 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                   icon: Icons.history_rounded,
                                 ),
                               ),
+                            if (state.catalogRefreshFailed)
+                              SliverToBoxAdapter(
+                                child: _notice(
+                                  '새 게임 목록을 갱신하지 못해 이전 전체 목록을 사용합니다.',
+                                  action: () =>
+                                      unawaited(_refresh(fullCatalog: true)),
+                                  icon: Icons.info_outline_rounded,
+                                ),
+                              ),
                             if (state.error != null)
                               SliverToBoxAdapter(
                                 child: _notice(
