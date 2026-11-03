@@ -54,6 +54,29 @@ void main() {
         find.text('일부 게임 목록 미확인 · 확인된 신규·변경 정보는 반영하고 기존 게임은 유지합니다.'),
         findsNothing,
       );
+      await tester.pump(const Duration(seconds: 5));
+      expect(find.textContaining('마지막 전체 가격 조회'), findsNothing);
+      expect(find.textContaining('목록 확인 시도'), findsNothing);
+
+      // A new refresh shows its result briefly, even after earlier notices hid.
+      repo.catalogFailure = CatalogMetadataException(
+        const FormatException('목록 누락'),
+      );
+      await tester.tap(find.byTooltip('새로고침'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('게임 목록까지 새로고침'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('마지막 전체 가격 조회'), findsOneWidget);
+      expect(find.textContaining('목록 확인 시도'), findsOneWidget);
+      expect(
+        find.text('일부 게임 목록 미확인 · 확인된 신규·변경 정보는 반영하고 기존 게임은 유지합니다.'),
+        findsOneWidget,
+      );
+      await tester.pump(const Duration(seconds: 5));
+      expect(find.textContaining('마지막 전체 가격 조회'), findsNothing);
+      expect(find.textContaining('목록 확인 시도'), findsNothing);
+      expect(find.textContaining('일부 게임 목록 미확인'), findsNothing);
+      expect(find.text('₩20,000'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },

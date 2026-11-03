@@ -24,9 +24,18 @@ class _MainScreenState extends ConsumerState<MainScreen>
   GameBrowse _browse = GameBrowse.sales;
   final _search = TextEditingController();
   Timer? _clock;
+  Timer? _noticeTimer;
+  bool _showStatusNotices = true;
   static const _pageSize = 20;
   int _page = 0;
   final _scroll = ScrollController();
+
+  void _scheduleStatusNoticeDismissal() {
+    _noticeTimer?.cancel();
+    _noticeTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) setState(() => _showStatusNotices = false);
+    });
+  }
 
   void _resetPage() {
     _page = 0;
@@ -91,6 +100,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
     final initial = ref.read(gameListProvider);
     if (initial.complete && initial.updatedAt == null) _browse = GameBrowse.all;
     WidgetsBinding.instance.addObserver(this);
+    _scheduleStatusNoticeDismissal();
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
@@ -117,6 +127,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
   @override
   void dispose() {
     _clock?.cancel();
+    _noticeTimer?.cancel();
     _search.dispose();
     _scroll.dispose();
     WidgetsBinding.instance.removeObserver(this);
@@ -126,6 +137,10 @@ class _MainScreenState extends ConsumerState<MainScreen>
   @override
   Widget build(BuildContext context) {
     ref.listen<GameListState>(gameListProvider, (previous, next) {
+      if (previous?.loading == true && !next.loading) {
+        setState(() => _showStatusNotices = true);
+        _scheduleStatusNoticeDismissal();
+      }
       if (previous?.blocking != true && next.blocking) {
         FocusManager.instance.primaryFocus?.unfocus();
       }
@@ -196,7 +211,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                       onPressed: () => showAboutDialog(
                         context: context,
                         applicationName: 'Switch 할인 트래커 KR',
-                        applicationVersion: '1.4.3',
+                        applicationVersion: '1.4.4',
                         applicationIcon: const Icon(
                           Icons.sports_esports_rounded,
                           color: Color(0xffe60012),
@@ -510,7 +525,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                   ],
                                 ),
                               ),
-                            if (state.games.isNotEmpty)
+                            if (_showStatusNotices && state.games.isNotEmpty)
                               SliverToBoxAdapter(
                                 child: _notice(
                                   '${state.complete
@@ -521,14 +536,16 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                   icon: Icons.history_rounded,
                                 ),
                               ),
-                            if (state.catalogCheckedAt != null)
+                            if (_showStatusNotices &&
+                                state.catalogCheckedAt != null)
                               SliverToBoxAdapter(
                                 child: _notice(
                                   '목록 확인 시도 · ${koreanDate(state.catalogCheckedAt!)}${state.catalogRefreshFailed ? ' · 일부 미확인' : ''}',
                                   icon: Icons.update_rounded,
                                 ),
                               ),
-                            if (state.catalogRefreshFailed)
+                            if (_showStatusNotices &&
+                                state.catalogRefreshFailed)
                               SliverToBoxAdapter(
                                 child: _notice(
                                   '일부 게임 목록 미확인 · 확인된 신규·변경 정보는 반영하고 기존 게임은 유지합니다.',
