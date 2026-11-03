@@ -156,7 +156,7 @@ void main() {
       expect(priceCounts, [30, 30, 30, 29]);
       expect(maxActive, 4);
       expect(
-        progress.where((p) => p.label == '전체 게임 목록 확인 중').last.completed,
+        progress.where((p) => p.label == '게임 목록 확인 중').last.completed,
         121,
       );
       expect(progress.last.completed, 119);

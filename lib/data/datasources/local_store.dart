@@ -9,11 +9,13 @@ abstract class LocalStore {
   bool get catalogComplete;
   DateTime? get cachedAt;
   DateTime? get catalogFetchedAt;
+  DateTime? get catalogCheckedAt;
   bool get catalogRefreshFailed;
   Future<void> saveGames(
     List<GameItem> games,
-    DateTime at, {
+    DateTime? at, {
     DateTime? catalogAt,
+    DateTime? catalogCheckedAt,
     bool catalogRefreshFailed = false,
   });
   Future<void> saveFavorite(GameItem game);
@@ -121,6 +123,14 @@ class HiveLocalStore implements LocalStore {
   }
 
   @override
+  DateTime? get catalogCheckedAt {
+    final snapshot = cache.get('catalog_snapshot_v3');
+    return snapshot is Map
+        ? parseDate(snapshot['catalog_checked_at']) ?? catalogFetchedAt
+        : null;
+  }
+
+  @override
   bool get catalogRefreshFailed {
     final snapshot = cache.get('catalog_snapshot_v3');
     return snapshot is Map && snapshot['catalog_refresh_failed'] == true;
@@ -136,7 +146,7 @@ class HiveLocalStore implements LocalStore {
     final decoded = _decode(raw);
     if (cachedAt == null &&
         !(snapshot['metadata_only'] == true &&
-            catalogFetchedAt != null &&
+            catalogCheckedAt != null &&
             decoded.every(
               (g) =>
                   g.priceCheckedAt == null &&
@@ -153,13 +163,18 @@ class HiveLocalStore implements LocalStore {
   @override
   Future<void> saveGames(
     List<GameItem> games,
-    DateTime at, {
+    DateTime? at, {
     DateTime? catalogAt,
+    DateTime? catalogCheckedAt,
     bool catalogRefreshFailed = false,
   }) => cache.put('catalog_snapshot_v3', {
     'games': games.map((g) => g.toJson()).toList(),
-    'updated_at': at.toIso8601String(),
-    'catalog_at': (catalogAt ?? at).toIso8601String(),
+    'updated_at': at?.toIso8601String(),
+    'catalog_at': (catalogAt ?? (catalogRefreshFailed ? null : at))
+        ?.toIso8601String(),
+    'catalog_checked_at': (catalogCheckedAt ?? catalogAt ?? at)
+        ?.toIso8601String(),
+    'metadata_only': at == null,
     'catalog_refresh_failed': catalogRefreshFailed,
   });
   @override

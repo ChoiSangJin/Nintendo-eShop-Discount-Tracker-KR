@@ -49,7 +49,12 @@ void main() {
               } else {
                 priceCalls++;
                 expect(options.uri.host, 'api.ec.nintendo.com');
-                expect(options.queryParameters['ids'], '70010000000001');
+                expect(
+                  (options.queryParameters['ids'] as String).split(',').toSet(),
+                  metadataOffline
+                      ? {'70010000000001'}
+                      : {'70010000000001', '70010000000002'},
+                );
                 handler.resolve(
                   Response(
                     requestOptions: options,
@@ -75,11 +80,11 @@ void main() {
         await controller.refresh(force: false);
         expect(catalogCalls, metadataOffline ? 1 : 2);
         expect(priceCalls, 1);
-        expect(controller.state.games.single.name, '검증한 전체 목록');
-        expect(controller.state.games.single.discountPrice, 20000);
+        expect(controller.state.games.first.name, '검증한 전체 목록');
+        expect(controller.state.games.first.discountPrice, 20000);
         expect(controller.state.error, isNull);
         expect(controller.state.catalogRefreshFailed, isTrue);
-        expect(store.games.single.id, '70010000000001');
+        expect(store.games.first.id, '70010000000001');
         expect(store.catalogFetchedAt, at);
         expect(store.cachedAt!.isAfter(at), isTrue);
         expect(store.catalogRefreshFailed, isTrue);
@@ -133,8 +138,10 @@ void main() {
       expect(priceCalls, 1);
       expect(controller.state.error, isNotNull);
       expect(controller.state.catalogRefreshFailed, isFalse);
-      expect(store.games.single.id, '70010000000001');
-      expect(store.catalogFetchedAt, at);
+      expect(store.games.first.id, '70010000000001');
+      expect(store.catalogFetchedAt!.isAfter(at), isTrue);
+      expect(store.games, hasLength(2));
+      expect(store.games.last.name, '새 전체 목록');
       expect(store.cachedAt, at);
       controller.dispose();
       dio.close();

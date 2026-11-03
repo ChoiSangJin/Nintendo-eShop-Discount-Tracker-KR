@@ -38,6 +38,10 @@ class MemoryStore implements LocalStore {
   @override
   DateTime? catalogFetchedAt;
   @override
+  DateTime? get catalogCheckedAt => _catalogCheckedAt ?? catalogFetchedAt;
+  DateTime? _catalogCheckedAt;
+  set catalogCheckedAt(DateTime? value) => _catalogCheckedAt = value;
+  @override
   bool catalogRefreshFailed = false;
   @override
   List<GameItem> readGames() => games;
@@ -46,15 +50,17 @@ class MemoryStore implements LocalStore {
   @override
   Future<void> saveGames(
     List<GameItem> games,
-    DateTime at, {
+    DateTime? at, {
     DateTime? catalogAt,
+    DateTime? catalogCheckedAt,
     bool catalogRefreshFailed = false,
   }) async {
     if (failWrites) throw StateError('Storage full');
     this.games = games;
     catalogComplete = true;
     cachedAt = at;
-    catalogFetchedAt = catalogAt ?? at;
+    catalogFetchedAt = catalogAt ?? (catalogRefreshFailed ? null : at);
+    this.catalogCheckedAt = catalogCheckedAt ?? catalogAt ?? at;
     this.catalogRefreshFailed = catalogRefreshFailed;
   }
 
@@ -93,13 +99,27 @@ class FakeRepository implements GameRepository {
   Future<List<GameItem>> fetchCatalog({
     List<GameItem>? metadata,
     ProgressCallback? onProgress,
+    MetadataCallback? onMetadata,
   }) async {
     catalogCalls++;
     metadataReuse.add(metadata != null);
     progress = onProgress;
     if (catalogFailure != null) throw catalogFailure!;
     if (failure != null) throw failure!;
-    return pending == null ? games : pending!.future;
+    final result = pending == null ? games : await pending!.future;
+    if (onMetadata == null || metadata != null) return result;
+    final merged = await onMetadata(CatalogUpdate(result));
+    final ids = result.map((g) => g.id).toSet();
+    final absent = merged.where((g) => !ids.contains(g.id)).toList();
+    final priced = absent.isEmpty ? <GameItem>[] : await refreshPrices(absent);
+    return merged
+        .map(
+          (g) =>
+              result.where((n) => n.id == g.id).firstOrNull ??
+              priced.where((n) => n.id == g.id).firstOrNull ??
+              g,
+        )
+        .toList();
   }
 
   @override

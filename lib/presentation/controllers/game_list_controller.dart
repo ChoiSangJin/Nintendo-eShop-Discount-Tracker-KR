@@ -77,6 +77,7 @@ class GameListState {
     this.complete = false,
     this.catalogRefreshFailed = false,
     this.updatedAt,
+    this.catalogCheckedAt,
     this.error,
     this.storageError,
     this.query = '',
@@ -90,6 +91,7 @@ class GameListState {
   final bool loading, cached, complete, loadingPopularity, savingFavorite;
   final bool catalogRefreshFailed;
   final DateTime? updatedAt;
+  final DateTime? catalogCheckedAt;
   final String? error, storageError, popularityError;
   final String query;
   final CatalogProgress? progress;
@@ -116,6 +118,7 @@ class GameListState {
     bool? complete,
     bool? catalogRefreshFailed,
     DateTime? updatedAt,
+    DateTime? catalogCheckedAt,
     String? error,
     bool clearError = false,
     String? storageError,
@@ -134,6 +137,7 @@ class GameListState {
     complete: complete ?? this.complete,
     catalogRefreshFailed: catalogRefreshFailed ?? this.catalogRefreshFailed,
     updatedAt: updatedAt ?? this.updatedAt,
+    catalogCheckedAt: catalogCheckedAt ?? this.catalogCheckedAt,
     error: clearError ? null : error ?? this.error,
     storageError: clearStorageError ? null : storageError ?? this.storageError,
     query: query ?? this.query,
@@ -157,6 +161,7 @@ class GameListController extends StateNotifier<GameListState> {
             for (final g in store.readFavorites()) g.id: _koreanRanksOnly(g),
           },
           updatedAt: store.cachedAt,
+          catalogCheckedAt: store.catalogCheckedAt,
         ),
       );
   final GameRepository repository;
@@ -212,6 +217,9 @@ class GameListController extends StateNotifier<GameListState> {
         !fullCatalog &&
         state.complete &&
         state.updatedAt != null &&
+        state.catalogCheckedAt != null &&
+        now.difference(state.catalogCheckedAt!) >= Duration.zero &&
+        now.difference(state.catalogCheckedAt!) < const Duration(hours: 24) &&
         now.difference(state.updatedAt!) >= Duration.zero &&
         now.difference(state.updatedAt!) < cacheLifetime) {
       state = state.copyWith(loading: false);
@@ -223,15 +231,18 @@ class GameListController extends StateNotifier<GameListState> {
       clearError: true,
       progress: const CatalogProgress('전체 게임 목록 확인 중', 0, 0),
     );
+    var pricePhase = false;
     try {
       final catalogAt = _catalogAt ?? store.catalogFetchedAt;
-      var reuseMetadata =
+      final checkedAt = state.catalogCheckedAt;
+      final reuseMetadata =
           !fullCatalog &&
           state.complete &&
           state.games.isNotEmpty &&
-          catalogAt != null &&
-          now.difference(catalogAt) >= Duration.zero &&
-          (force || now.difference(catalogAt) < const Duration(hours: 24));
+          checkedAt != null &&
+          now.difference(checkedAt) >= Duration.zero &&
+          (force || now.difference(checkedAt) < const Duration(hours: 24));
+      pricePhase = reuseMetadata;
       void progress(CatalogProgress progress) {
         if (mounted) state = state.copyWith(progress: progress);
       }
@@ -241,19 +252,61 @@ class GameListController extends StateNotifier<GameListState> {
         games = await repository.fetchCatalog(
           metadata: reuseMetadata ? state.games : null,
           onProgress: progress,
+          onMetadata: (update) async {
+            if (!mounted) throw StateError('목록 갱신이 취소되었습니다.');
+            final old = {for (final game in state.games) game.id: game};
+            final merged = {...old};
+            for (final game in update.games) {
+              final previous = old[game.id];
+              merged[game.id] = previous == null
+                  ? game
+                  : GameItem.fromJson({
+                      ...game.toJson(),
+                      for (final key in [
+                        'regularPrice',
+                        'discountPrice',
+                        'discountStart',
+                        'discountEnd',
+                        'priceCheckedAt',
+                      ])
+                        key: previous.toJson()[key],
+                      'popularityRank': previous.platform == game.platform
+                          ? previous.popularityRank
+                          : null,
+                      'popularitySource': previous.platform == game.platform
+                          ? previous.popularitySource
+                          : null,
+                    });
+            }
+            final at = DateTime.now().toUtc();
+            _catalogAt = update.complete ? at : catalogAt;
+            state = state.copyWith(
+              games: _ranked(merged.values.toList()),
+              complete: true,
+              catalogCheckedAt: at,
+              catalogRefreshFailed: !update.complete,
+              cached: true,
+            );
+            await _saveCache();
+            pricePhase = true;
+            return state.games;
+          },
         );
       } on CatalogMetadataException {
         if (!mounted ||
             !state.complete ||
             state.games.isEmpty ||
-            catalogAt == null ||
-            now.isBefore(catalogAt)) {
+            checkedAt == null ||
+            now.isBefore(checkedAt)) {
           rethrow;
         }
         // Keep the previously verified full catalog and its original date.
         // Never publish the incomplete collection as the new catalog.
-        reuseMetadata = true;
-        state = state.copyWith(catalogRefreshFailed: true);
+        state = state.copyWith(
+          catalogRefreshFailed: true,
+          catalogCheckedAt: now,
+        );
+        pricePhase = true;
         games = await repository.refreshPrices(
           state.games,
           onProgress: progress,
@@ -261,7 +314,7 @@ class GameListController extends StateNotifier<GameListState> {
       }
       if (!mounted) return;
       if (games.isEmpty) throw const FormatException('전체 목록이 비어 있습니다.');
-      _catalogAt = reuseMetadata ? catalogAt : DateTime.now().toUtc();
+      _catalogAt ??= catalogAt;
       final previousRanks = {for (final g in state.games) g.id: g};
       final ranked = _popularity == null
           ? games
@@ -278,9 +331,6 @@ class GameListController extends StateNotifier<GameListState> {
         complete: true,
         cached: false,
         updatedAt: DateTime.now().toUtc(),
-        catalogRefreshFailed: reuseMetadata
-            ? state.catalogRefreshFailed
-            : false,
       );
       await _saveCache();
       await _syncFavorites(ranked);
@@ -310,7 +360,9 @@ class GameListController extends StateNotifier<GameListState> {
                     (error.response?.statusCode == 403 ||
                         error.response?.statusCode == 429)
               ? 'eShop이 요청을 제한했습니다. 저장된 목록을 표시합니다. 잠시 후 가격을 다시 갱신해 주세요.'
-              : '전체 게임 정보를 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.',
+              : pricePhase
+              ? '가격 정보를 갱신하지 못했습니다. 확인된 게임 목록과 마지막 조회 가격을 표시합니다.'
+              : '게임 목록을 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.',
         );
       }
     } finally {
@@ -320,12 +372,13 @@ class GameListController extends StateNotifier<GameListState> {
   }
 
   Future<void> _saveCache() async {
-    if (!state.complete || state.updatedAt == null) return;
+    if (!state.complete) return;
     try {
       await store.saveGames(
         state.games,
-        state.updatedAt!,
+        state.updatedAt,
         catalogAt: _catalogAt ?? store.catalogFetchedAt,
+        catalogCheckedAt: state.catalogCheckedAt,
         catalogRefreshFailed: state.catalogRefreshFailed,
       );
     } on Object {

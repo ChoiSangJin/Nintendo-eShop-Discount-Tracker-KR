@@ -18,15 +18,26 @@ typedef ProgressCallback = void Function(CatalogProgress progress);
 
 /// Identifies a failed metadata collection without disguising price failures.
 class CatalogMetadataException extends FormatException {
-  CatalogMetadataException(this.cause)
+  CatalogMetadataException(this.cause, {this.games = const []})
     : super(cause is FormatException ? cause.message : '새 게임 목록을 갱신하지 못했습니다.');
   final Exception cause;
+  final List<GameItem> games;
 }
+
+class CatalogUpdate {
+  const CatalogUpdate(this.games, {this.complete = true});
+  final List<GameItem> games;
+  final bool complete;
+}
+
+typedef MetadataCallback =
+    Future<List<GameItem>> Function(CatalogUpdate update);
 
 abstract class GameRepository {
   Future<List<GameItem>> fetchCatalog({
     List<GameItem>? metadata,
     ProgressCallback? onProgress,
+    MetadataCallback? onMetadata,
   });
   Future<PopularityIndex> fetchPopularity();
   Future<List<GameItem>> refreshPrices(
@@ -59,16 +70,21 @@ class NintendoGameRepository implements GameRepository {
   Future<List<GameItem>> fetchCatalog({
     List<GameItem>? metadata,
     ProgressCallback? onProgress,
+    MetadataCallback? onMetadata,
   }) async {
     if (metadata != null && metadata.isNotEmpty) {
       return refreshPrices(metadata, onProgress: onProgress);
     }
-    final List<GameItem> games;
+    CatalogUpdate update;
     try {
-      games = await fetchMetadata(onProgress: onProgress);
+      update = CatalogUpdate(await fetchMetadata(onProgress: onProgress));
+    } on CatalogMetadataException catch (error) {
+      if (onMetadata == null || error.games.isEmpty) rethrow;
+      update = CatalogUpdate(error.games, complete: false);
     } on Exception catch (error, stack) {
       Error.throwWithStackTrace(CatalogMetadataException(error), stack);
     }
+    final games = onMetadata == null ? update.games : await onMetadata(update);
     return refreshPrices(games, onProgress: onProgress);
   }
 
@@ -97,18 +113,22 @@ class NintendoGameRepository implements GameRepository {
     final pages = (total / catalogPageSize).ceil();
     final records = <String, Map<String, dynamic>>{};
     final boundaryPages = <num>{};
+    var complete = true;
     void accept(Map<String, dynamic> data, num number) {
       final items = data['items'] as List;
       final offset = ((number - 1) * catalogPageSize).round();
-      final expected = min(catalogPageSize, total - offset);
-      if (data['total'] != total || items.length != expected) {
-        throw const FormatException('전체 목록 확인 중 카탈로그가 변경되었습니다. 다시 시도해 주세요.');
+      if (data['total'] != total ||
+          items.length != min(catalogPageSize, total - offset)) {
+        complete = false;
       }
       for (final item in items) {
         if (item is! Map ||
             item['sys'] is! Map ||
-            item['sys']['id'] is! String) {
-          throw const FormatException('카탈로그 항목을 확인할 수 없습니다.');
+            item['sys']['id'] is! String ||
+            item['title'] is! String ||
+            (item['title'] as String).trim().isEmpty) {
+          complete = false;
+          continue;
         }
         if (records.containsKey(item['sys']['id'])) boundaryPages.add(number);
         records.putIfAbsent(
@@ -116,7 +136,7 @@ class NintendoGameRepository implements GameRepository {
           () => Map<String, dynamic>.from(item),
         );
       }
-      onProgress?.call(CatalogProgress('전체 게임 목록 확인 중', records.length, total));
+      onProgress?.call(CatalogProgress('게임 목록 확인 중', records.length, total));
     }
 
     accept(first, 1);
@@ -131,13 +151,13 @@ class NintendoGameRepository implements GameRepository {
         try {
           while (next < numbers.length &&
               !failed &&
-              !(finishEarly && records.length == total)) {
+              !(finishEarly && records.length >= total)) {
             final number = numbers[next++];
             accept(await page(number, oldest: oldest), number);
           }
-        } on Object {
+        } on Exception {
           failed = true;
-          rethrow;
+          complete = false;
         }
       }
 
@@ -145,8 +165,6 @@ class NintendoGameRepository implements GameRepository {
     }
 
     await scan(List.generate(pages - 1, (i) => i + 2), finishEarly: false);
-    // Repair the boundaries that actually overlapped before rescanning the
-    // entire catalog in reverse. Keep the full coverage checks below.
     if (records.length < total && boundaryPages.length <= 4) {
       final repairs = {
         for (final number in boundaryPages)
@@ -157,43 +175,43 @@ class NintendoGameRepository implements GameRepository {
       }.toList()..sort();
       await scan(repairs);
     }
-    // Nintendo sorts only by release date. Equal-date records can move across
-    // offset boundaries even in an unchanged catalog. Scan the reverse order
-    // and overlapping windows until every distinct official record is present.
-    // Numeric page offsets are accepted by this API (0.5 page = 12 records).
+    // One reverse pass can recover unstable date boundaries. Do not repeatedly
+    // scan the whole catalog to chase a count that may never match.
     if (records.length < total) {
       await scan(List.generate(pages, (i) => i + 1), oldest: true);
     }
-    for (final shift in [0.5, 0.25, 0.75]) {
-      if (records.length == total) break;
-      await scan(
-        List.generate(
-          ((total - 1) / catalogPageSize - shift).floor() + 1,
-          (i) => i + 1 + shift,
-        ),
-      );
-    }
-    if (records.length != total) {
-      throw const FormatException(
-        '전체 게임 목록을 확보하지 못했습니다. 저장된 목록을 표시합니다. 잠시 후 다시 시도해 주세요.',
-      );
-    }
-    final check = await page(1);
-    if (check['total'] != total ||
-        jsonEncode(check['items']) != jsonEncode(first['items'])) {
-      throw const FormatException('전체 목록 확인 중 카탈로그가 변경되었습니다. 다시 시도해 주세요.');
+    complete = complete && records.length == total;
+    if (complete) {
+      try {
+        final check = await page(1);
+        complete =
+            check['total'] == total &&
+            jsonEncode(check['items']) == jsonEncode(first['items']);
+      } on Exception {
+        complete = false;
+      }
     }
     final games = <String, GameItem>{};
     for (final record in records.values) {
-      for (final product in expandCatalogRecord(record)) {
-        final game = GameItem.fromKoreanCatalog(product);
-        games.putIfAbsent(
-          game.id,
-          () => game.withName(titles.cachedName(game.id, game.name)),
-        );
+      try {
+        for (final product in expandCatalogRecord(record)) {
+          final game = GameItem.fromKoreanCatalog(product);
+          games.putIfAbsent(
+            game.id,
+            () => game.withName(titles.cachedName(game.id, game.name)),
+          );
+        }
+      } on Object {
+        complete = false;
       }
     }
     if (games.isEmpty) throw const FormatException('유효한 게임 목록이 없습니다.');
+    if (!complete) {
+      throw CatalogMetadataException(
+        FormatException('일부 게임 목록을 확인하지 못했습니다 (${records.length}/$total).'),
+        games: games.values.toList(),
+      );
+    }
     return games.values.toList();
   }
 
