@@ -55,18 +55,23 @@ enum GameBrowse {
   final String label;
 }
 
+/// Filter only known effective selling prices, never catalog/storage records.
+bool matchesPricePolicy(GameItem game, DateTime now) {
+  final price = game.priceAt(now);
+  return price == null || price < 1000 || price >= 5000;
+}
+
 bool matchesBrowse(
   GameItem game,
   GameBrowse browse,
   String query,
   DateTime now,
 ) {
+  if (!matchesPricePolicy(game, now)) return false;
   if (browse == GameBrowse.upcoming) return game.upcomingAt(now);
   if (browse == GameBrowse.all || query.trim().isNotEmpty) return true;
   final price = game.priceAt(now);
-  return game.saleActiveAt(now) &&
-      price != null &&
-      (price < 1000 || price >= 5000);
+  return game.saleActiveAt(now) && price != null;
 }
 
 class GameListState {
@@ -526,6 +531,7 @@ List<GameItem> filterAndSortGames(
   };
   final needle = normalizeSearch(query);
   final filtered = source.where((game) {
+    if (!matchesPricePolicy(game, now)) return false;
     if (sort == GameSort.popular &&
         (!game.hasKoreanPopularity || !game.saleActiveAt(now))) {
       return false;
