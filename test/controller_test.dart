@@ -40,12 +40,12 @@ void main() {
       await restored.refresh(force: false);
       expect(
         repo.catalogCalls,
-        1,
-      ); // Fresh prices need no repeat of the failed scan.
+        2,
+      ); // A failed metadata scan still needs daily completion.
       expect(restored.state.catalogRefreshFailed, isTrue);
       repo.catalogFailure = null;
       await restored.refresh();
-      expect(repo.metadataReuse, [false, true]);
+      expect(repo.metadataReuse, [false, false, true]);
       expect(store.catalogFetchedAt, catalogAt);
       expect(store.catalogRefreshFailed, isTrue);
       repo.games = [exampleGame(), exampleGame(id: 'new')];
@@ -250,18 +250,19 @@ void main() {
     },
   );
   test(
-    'automatic refresh reuses a complete snapshot within 12 hours after restart',
+    'automatic refresh reuses a snapshot collected since the latest Korean 01:00',
     () async {
       for (final age in [
         const Duration(minutes: 20),
         const Duration(hours: 11, minutes: 59),
       ]) {
         final store = MemoryStore();
-        final fetchedAt = DateTime.now().toUtc().subtract(age);
+        final now = DateTime.utc(2026, 11, 17, 5); // 14:00 KST
+        final fetchedAt = now.subtract(age);
         final game = exampleGame(name: '저장된 게임');
         await store.saveGames([game], fetchedAt);
         final repo = FakeRepository()..failure = StateError('offline');
-        final controller = GameListController(repo, store);
+        final controller = GameListController(repo, store, clock: () => now);
         await controller.refresh(force: false);
         expect(repo.catalogCalls, 0);
         expect(controller.state.loading, isFalse);
@@ -271,7 +272,7 @@ void main() {
         expect(store.cachedAt, fetchedAt);
         controller.dispose();
 
-        final restored = GameListController(repo, store);
+        final restored = GameListController(repo, store, clock: () => now);
         await restored.refresh(force: false);
         expect(repo.catalogCalls, 0);
         expect(restored.state.games.single.name, '저장된 게임');
@@ -280,28 +281,24 @@ void main() {
     },
   );
   test(
-    'automatic expired-price refresh reuses only recent complete metadata',
+    'missed daily collection scans metadata even when less than 24 hours old',
     () async {
+      final now = DateTime.utc(2026, 11, 16, 17); // 02:00 KST
       final store = MemoryStore();
       await store.saveGames(
         [exampleGame()],
-        DateTime.now().subtract(const Duration(hours: 12)),
-        catalogAt: DateTime.now().subtract(const Duration(hours: 13)),
+        now.subtract(const Duration(hours: 12)),
+        catalogAt: now.subtract(const Duration(hours: 13)),
       );
       final repo = FakeRepository();
-      final controller = GameListController(repo, store);
+      final controller = GameListController(repo, store, clock: () => now);
       await controller.refresh(force: false);
-      expect(repo.metadataReuse, [true]);
-      expect(
-        store.catalogFetchedAt!.isBefore(
-          DateTime.now().subtract(const Duration(hours: 1)),
-        ),
-        isTrue,
-      );
+      expect(repo.metadataReuse, [false]);
+      expect(store.catalogFetchedAt, now);
       await controller.refresh();
-      expect(repo.metadataReuse, [true, true]);
+      expect(repo.metadataReuse, [false, true]);
       await controller.refresh(fullCatalog: true);
-      expect(repo.metadataReuse, [true, true, false]);
+      expect(repo.metadataReuse, [false, true, false]);
       controller.dispose();
     },
   );
