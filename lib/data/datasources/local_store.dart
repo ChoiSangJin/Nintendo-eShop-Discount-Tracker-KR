@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../services/catalog_database.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../domain/models/game_item.dart';
@@ -24,20 +25,60 @@ abstract class LocalStore {
   Future<void> saveKoreanTitle(String id, String title);
 }
 
-class HiveLocalStore implements LocalStore {
-  HiveLocalStore(this.cache, this.favorites, this.titles);
+abstract interface class CoordinatedStore {
+  Future<bool> beginCollection();
+  Future<void> endCollection();
+  Future<DateTime?> get lastAutomaticAttempt;
+  Future<void> recordAutomaticAttempt(DateTime at);
+}
+
+class HiveLocalStore implements LocalStore, CoordinatedStore {
+  HiveLocalStore(this.cache, this.favorites, this.titles, {this.database});
+  final CatalogDatabase? database;
+  dynamic get _snapshot =>
+      database?.snapshot ?? cache.get('catalog_snapshot_v3');
+  Future<void> _writeSnapshot(Map<String, dynamic> value) => database == null
+      ? cache.put('catalog_snapshot_v3', value)
+      : database!.save(value);
+
+  @override
+  Future<bool> beginCollection() async =>
+      await database?.acquire(DateTime.now().toUtc()) ?? true;
+  @override
+  Future<void> endCollection() async => database?.release();
+  @override
+  Future<DateTime?> get lastAutomaticAttempt async =>
+      await database?.lastAttempt;
+  @override
+  Future<void> recordAutomaticAttempt(DateTime at) async =>
+      database?.recordAttempt(at);
+
+  Future<void> close() async {
+    await cache.close();
+    await favorites.close();
+    await titles.close();
+    await database?.close();
+  }
+
   final Box<dynamic> cache;
   final Box<dynamic> favorites;
   final Box<dynamic> titles;
 
-  static Future<HiveLocalStore> open() async {
-    await Hive.initFlutter();
+  static Future<HiveLocalStore> open({bool background = false}) async {
+    // Background-only boxes never open the foreground's Hive files.
+    await Hive.initFlutter(background ? 'daily_worker' : null);
+    final database = await CatalogDatabase.open();
     final store = HiveLocalStore(
       await Hive.openBox<dynamic>('sales_cache_v1'),
       await Hive.openBox<dynamic>('favorites_v1'),
       await Hive.openBox<dynamic>('korean_titles_v1'),
+      database: database,
     );
-    await store.seedCatalog();
+    if (database.snapshot == null && !background) {
+      final legacy = store.cache.get('catalog_snapshot_v3');
+      if (legacy is Map) await database.save(Map<String, dynamic>.from(legacy));
+    }
+    if (!background) await store.seedCatalog();
     return store;
   }
 
@@ -71,7 +112,7 @@ class HiveLocalStore implements LocalStore {
           )) {
         return;
       }
-      await cache.put('catalog_snapshot_v3', {
+      await _writeSnapshot({
         'games': raw,
         'metadata_only': true,
         'catalog_at': catalogAt.toIso8601String(),
@@ -97,8 +138,7 @@ class HiveLocalStore implements LocalStore {
 
   @override
   List<GameItem> readGames() {
-    final snapshot =
-        cache.get('catalog_snapshot_v3') ?? cache.get('catalog_snapshot_v2');
+    final snapshot = _snapshot ?? cache.get('catalog_snapshot_v2');
     final value = snapshot is Map
         ? snapshot['games']
         : cache.get('games', defaultValue: <dynamic>[]);
@@ -109,8 +149,7 @@ class HiveLocalStore implements LocalStore {
   List<GameItem> readFavorites() => _decode(favorites.values);
   @override
   DateTime? get cachedAt {
-    final snapshot =
-        cache.get('catalog_snapshot_v3') ?? cache.get('catalog_snapshot_v2');
+    final snapshot = _snapshot ?? cache.get('catalog_snapshot_v2');
     return parseDate(
       snapshot is Map ? snapshot['updated_at'] : cache.get('updated_at'),
     );
@@ -118,13 +157,13 @@ class HiveLocalStore implements LocalStore {
 
   @override
   DateTime? get catalogFetchedAt {
-    final snapshot = cache.get('catalog_snapshot_v3');
+    final snapshot = _snapshot;
     return snapshot is Map ? parseDate(snapshot['catalog_at']) : null;
   }
 
   @override
   DateTime? get catalogCheckedAt {
-    final snapshot = cache.get('catalog_snapshot_v3');
+    final snapshot = _snapshot;
     return snapshot is Map
         ? parseDate(snapshot['catalog_checked_at']) ?? catalogFetchedAt
         : null;
@@ -132,13 +171,13 @@ class HiveLocalStore implements LocalStore {
 
   @override
   bool get catalogRefreshFailed {
-    final snapshot = cache.get('catalog_snapshot_v3');
+    final snapshot = _snapshot;
     return snapshot is Map && snapshot['catalog_refresh_failed'] == true;
   }
 
   @override
   bool get catalogComplete {
-    final snapshot = cache.get('catalog_snapshot_v3');
+    final snapshot = _snapshot;
     if (snapshot is! Map || snapshot['games'] is! List) {
       return false;
     }
@@ -167,7 +206,7 @@ class HiveLocalStore implements LocalStore {
     DateTime? catalogAt,
     DateTime? catalogCheckedAt,
     bool catalogRefreshFailed = false,
-  }) => cache.put('catalog_snapshot_v3', {
+  }) => _writeSnapshot({
     'games': games.map((g) => g.toJson()).toList(),
     'updated_at': at?.toIso8601String(),
     'catalog_at': (catalogAt ?? (catalogRefreshFailed ? null : at))

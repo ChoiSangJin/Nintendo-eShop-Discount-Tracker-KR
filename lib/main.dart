@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'data/services/daily_collection_scheduler.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'data/datasources/local_store.dart';
@@ -9,6 +11,8 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
     final store = await HiveLocalStore.open();
+    // A scheduling failure must not prevent access to saved games.
+    unawaited(DailyCollectionScheduler.initialize().catchError((Object _) {}));
     runApp(
       ProviderScope(
         overrides: [localStoreProvider.overrideWithValue(store)],

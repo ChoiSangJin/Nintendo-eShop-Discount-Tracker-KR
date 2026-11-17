@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/datasources/korean_title_resolver.dart';
 import '../../data/datasources/local_store.dart';
+import '../../data/services/daily_collection_policy.dart';
 import '../../data/repositories/game_repository.dart';
 import '../../domain/models/game_item.dart';
 import '../../domain/models/popularity_index.dart';
@@ -151,8 +152,9 @@ class GameListState {
 }
 
 class GameListController extends StateNotifier<GameListState> {
-  GameListController(this.repository, this.store)
-    : super(
+  GameListController(this.repository, this.store, {DateTime Function()? clock})
+    : _clock = clock ?? DateTime.now,
+      super(
         GameListState(
           games: store.readGames().map(_koreanRanksOnly).toList(),
           complete: store.catalogComplete,
@@ -166,9 +168,21 @@ class GameListController extends StateNotifier<GameListState> {
       );
   final GameRepository repository;
   final LocalStore store;
+  final DateTime Function() _clock;
   static GameItem _koreanRanksOnly(GameItem game) =>
       game.hasKoreanPopularity ? game : game.withPopularityRank(null);
-  static const cacheLifetime = Duration(hours: 12);
+  void _reloadSnapshot() {
+    _catalogAt = store.catalogFetchedAt;
+    state = state.copyWith(
+      games: _ranked(store.readGames().map(_koreanRanksOnly).toList()),
+      complete: store.catalogComplete,
+      catalogRefreshFailed: store.catalogRefreshFailed,
+      catalogCheckedAt: store.catalogCheckedAt,
+      updatedAt: store.cachedAt,
+      cached: true,
+    );
+  }
+
   final Set<String> _favoriteWrites = {};
   PopularityIndex? _popularity;
   bool _refreshing = false;
@@ -186,9 +200,19 @@ class GameListController extends StateNotifier<GameListState> {
             .toList();
 
   Future<void> loadPopularity() async {
-    if (state.busy) return;
+    if (_refreshing || state.busy) return;
+    _refreshing = true;
+    final coordinated = store is CoordinatedStore
+        ? store as CoordinatedStore
+        : null;
+    var acquired = false;
     state = state.copyWith(loadingPopularity: true, clearPopularityError: true);
     try {
+      if (coordinated != null) {
+        acquired = await coordinated.beginCollection();
+        if (!mounted || !acquired) return;
+        _reloadSnapshot();
+      }
       _popularity = await repository.fetchPopularity();
       if (!mounted) return;
       state = state.copyWith(
@@ -206,33 +230,59 @@ class GameListController extends StateNotifier<GameListState> {
         );
       }
     } finally {
-      if (mounted) state = state.copyWith(loadingPopularity: false);
+      try {
+        if (acquired) await coordinated?.endCollection();
+      } finally {
+        _refreshing = false;
+        if (mounted) state = state.copyWith(loadingPopularity: false);
+      }
     }
   }
 
   Future<void> refresh({bool force = true, bool fullCatalog = false}) async {
     if (_refreshing || state.loadingPopularity || state.savingFavorite) return;
-    final now = DateTime.now().toUtc();
-    if (!force &&
-        !fullCatalog &&
-        state.complete &&
-        state.updatedAt != null &&
-        state.catalogCheckedAt != null &&
-        now.difference(state.catalogCheckedAt!) >= Duration.zero &&
-        now.difference(state.catalogCheckedAt!) < const Duration(hours: 24) &&
-        now.difference(state.updatedAt!) >= Duration.zero &&
-        now.difference(state.updatedAt!) < cacheLifetime) {
-      state = state.copyWith(loading: false);
-      return;
-    }
     _refreshing = true;
-    state = state.copyWith(
-      loading: true,
-      clearError: true,
-      progress: const CatalogProgress('전체 게임 목록 확인 중', 0, 0),
-    );
+    final coordinated = store is CoordinatedStore
+        ? store as CoordinatedStore
+        : null;
+    var acquired = false;
     var pricePhase = false;
     try {
+      if (coordinated != null) {
+        acquired = await coordinated.beginCollection();
+        if (!mounted) return;
+        if (!acquired) {
+          state = state.copyWith(loading: false);
+          return;
+        }
+        _reloadSnapshot();
+      }
+      final now = _clock().toUtc();
+      final due =
+          !state.complete ||
+          DailyCollectionPolicy.isDue(
+            now,
+            store.catalogFetchedAt,
+            state.updatedAt,
+          );
+      if (!force && !fullCatalog) {
+        if (!due) {
+          await _syncFavorites(state.games);
+          return;
+        }
+        final attemptedAt = await coordinated?.lastAutomaticAttempt;
+        if (attemptedAt != null &&
+            !attemptedAt.isAfter(now) &&
+            now.difference(attemptedAt) < DailyCollectionPolicy.retryDelay) {
+          return;
+        }
+        await coordinated?.recordAutomaticAttempt(now);
+      }
+      state = state.copyWith(
+        loading: true,
+        clearError: true,
+        progress: const CatalogProgress('전체 게임 목록 확인 중', 0, 0),
+      );
       final catalogAt = _catalogAt ?? store.catalogFetchedAt;
       final checkedAt = state.catalogCheckedAt;
       final reuseMetadata =
@@ -241,7 +291,7 @@ class GameListController extends StateNotifier<GameListState> {
           state.games.isNotEmpty &&
           checkedAt != null &&
           now.difference(checkedAt) >= Duration.zero &&
-          (force || now.difference(checkedAt) < const Duration(hours: 24));
+          (force || !DailyCollectionPolicy.isDue(now, catalogAt, catalogAt));
       pricePhase = reuseMetadata;
       void progress(CatalogProgress progress) {
         if (mounted) state = state.copyWith(progress: progress);
@@ -278,7 +328,7 @@ class GameListController extends StateNotifier<GameListState> {
                           : null,
                     });
             }
-            final at = DateTime.now().toUtc();
+            final at = _clock().toUtc();
             _catalogAt = update.complete ? at : catalogAt;
             state = state.copyWith(
               games: _ranked(merged.values.toList()),
@@ -330,7 +380,7 @@ class GameListController extends StateNotifier<GameListState> {
         games: ranked,
         complete: true,
         cached: false,
-        updatedAt: DateTime.now().toUtc(),
+        updatedAt: _clock().toUtc(),
       );
       await _saveCache();
       await _syncFavorites(ranked);
@@ -366,8 +416,12 @@ class GameListController extends StateNotifier<GameListState> {
         );
       }
     } finally {
-      _refreshing = false;
-      if (mounted) state = state.copyWith(loading: false);
+      try {
+        if (acquired) await coordinated?.endCollection();
+      } finally {
+        _refreshing = false;
+        if (mounted) state = state.copyWith(loading: false);
+      }
     }
   }
 

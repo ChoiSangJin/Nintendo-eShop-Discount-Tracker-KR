@@ -134,7 +134,7 @@ void main() {
     final store = MemoryStore();
     await store.saveGames([
       exampleGame(),
-    ], DateTime.now().subtract(const Duration(hours: 13)));
+    ], DateTime.now().subtract(const Duration(days: 2)));
     final repo = FakeRepository()..pending = Completer();
     await tester.pumpWidget(
       ProviderScope(
@@ -146,7 +146,7 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(repo.metadataReuse, [true]);
+    expect(repo.metadataReuse, [false]);
     expect(find.byKey(const ValueKey('global-loading-barrier')), findsNothing);
     expect(tester.widget<PopScope>(find.byType(PopScope)).canPop, isTrue);
     await tester.tap(find.text('전체 게임'));
@@ -381,10 +381,10 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('price age notice uses the 12-hour automatic refresh interval', (
+  testWidgets('price age notice uses the Korean 01:00 daily boundary', (
     tester,
   ) async {
-    final checkedAt = DateTime.utc(2026, 10, 12);
+    final checkedAt = DateTime.utc(2026, 11, 16, 15, 59);
     final game = exampleGame().withPrice({
       'regular_price': {'raw_value': '50000'},
     }, checkedAt);
@@ -402,9 +402,9 @@ void main() {
         ),
       ),
     );
-    await showAt(const Duration(hours: 11, minutes: 59));
+    await showAt(const Duration(seconds: 59));
     expect(find.textContaining('마지막 조회 가격'), findsNothing);
-    await showAt(const Duration(hours: 12, minutes: 1));
+    await showAt(const Duration(seconds: 61));
     expect(find.textContaining('마지막 조회 가격'), findsOneWidget);
   });
   testWidgets(

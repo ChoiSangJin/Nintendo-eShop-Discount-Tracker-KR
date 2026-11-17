@@ -24,6 +24,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
   GameBrowse _browse = GameBrowse.sales;
   final _search = TextEditingController();
   Timer? _clock;
+  bool _appResumed = true;
   Timer? _noticeTimer;
   bool _showStatusNotices = true;
   static const _pageSize = 20;
@@ -102,7 +103,10 @@ class _MainScreenState extends ConsumerState<MainScreen>
     WidgetsBinding.instance.addObserver(this);
     _scheduleStatusNoticeDismissal();
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
-      if (mounted) setState(() {});
+      if (mounted && _appResumed) {
+        setState(() {});
+        unawaited(ref.read(gameListProvider.notifier).refresh(force: false));
+      }
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -113,14 +117,10 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appResumed = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed &&
         ModalRoute.of(context)?.isCurrent == true) {
-      final last = ref.read(gameListProvider).updatedAt;
-      if (last == null ||
-          DateTime.now().toUtc().difference(last) >
-              GameListController.cacheLifetime) {
-        unawaited(_refresh(force: false));
-      }
+      unawaited(_refresh(force: false));
     }
   }
 
@@ -211,7 +211,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                       onPressed: () => showAboutDialog(
                         context: context,
                         applicationName: 'Switch 할인 트래커 KR',
-                        applicationVersion: '1.4.4',
+                        applicationVersion: '1.5.0',
                         applicationIcon: const Icon(
                           Icons.sports_esports_rounded,
                           color: Color(0xffe60012),
@@ -221,6 +221,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                           Text(
                             '한국 Nintendo eShop 할인 탐색 · 관심 게임 저장\n\n'
                             '한국 eShop 및 한국 공식 스토어 정보를 사용합니다. 정식 한국어 제목이 확인되는 게임은 한국어로 표시합니다.\n\n'
+                            '매일 한국 시간 새벽 1시 이후 자동으로 목록과 가격을 갱신합니다. 절전·네트워크 상태에 따라 늦어질 수 있으며, 누락된 수집은 앱 실행 시 보완합니다.\n\n'
                             'Nintendo와 제휴하지 않은 팬 앱입니다. Nintendo Switch 및 관련 상표는 Nintendo의 자산입니다.',
                           ),
                         ],
