@@ -33,10 +33,10 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: bash tool/build_release.sh
-      - name: Verify update signing certificate
+      - name: Verify configured release signing certificate
         run: |
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs dist/*.apk > "$RUNNER_TEMP/apk-certificate.txt"
-          grep -F 'certificate SHA-256 digest: 74b994a84b3df7aefe056c657b182877398889f9bf513bcf0980e90b6373dd48' "$RUNNER_TEMP/apk-certificate.txt"
+          grep -F 'certificate SHA-256 digest: ebd50026880286899e286b7cab2a240aed5b64a3b19b5a1b12addc6a8d2b8d6e' "$RUNNER_TEMP/apk-certificate.txt"
       - uses: actions/upload-artifact@v4
         with:
           name: switch-sale-tracker-kr-arm64
@@ -46,7 +46,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="v$(sed -n 's/^version: \([^+]*\).*/\1/p' pubspec.yaml)"
-          gh release create "$tag" dist/* --target "$GITHUB_SHA" --title "Switch 할인 트래커 KR $tag" --generate-notes
+          notes_args=(--generate-notes)
+          if [[ -f "release-notes/$tag.md" ]]; then
+            notes_args=(--notes-file "release-notes/$tag.md")
+          fi
+          gh release create "$tag" dist/* --target "$GITHUB_SHA" --title "Switch 할인 트래커 KR $tag" "${notes_args[@]}"
       - name: Remove runner signing key
         if: always()
         run: rm -f "$RUNNER_TEMP/release.jks"
