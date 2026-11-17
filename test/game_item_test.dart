@@ -4,6 +4,62 @@ import 'package:switch_sale_tracker/presentation/controllers/game_list_controlle
 import 'support/fakes.dart';
 
 void main() {
+  test('price exclusion boundaries apply to every sort and browse path', () {
+    final now = DateTime.now().toUtc();
+    final games = [
+      for (final price in [999, 1000, 4999, 5000])
+        exampleGame(
+          id: '$price',
+          regular: 10000,
+          discount: price,
+        ).withPopularityRank(1, source: 'kr:2026:1st'),
+    ];
+    for (final sort in GameSort.values) {
+      final found = filterAndSortGames(
+        games,
+        genre: '전체',
+        query: '',
+        sort: sort,
+        now: now,
+      );
+      expect(found.map((g) => g.id).toSet(), {
+        '999',
+        '5000',
+      }, reason: sort.label);
+    }
+    for (final mode in [GameBrowse.sales, GameBrowse.all]) {
+      for (final query in ['', '검색']) {
+        expect(
+          games
+              .where((g) => matchesBrowse(g, mode, query, now))
+              .map((g) => g.id)
+              .toSet(),
+          {'999', '5000'},
+        );
+      }
+    }
+    final upcoming = exampleGame(
+      regular: 3000,
+      discount: null,
+      releaseDate: now.add(const Duration(days: 1)),
+    );
+    expect(matchesBrowse(upcoming, GameBrowse.upcoming, '', now), isFalse);
+    final unknown = exampleGame(regular: null, discount: null);
+    expect(matchesPricePolicy(unknown, now), isTrue);
+    expect(matchesPricePolicy(exampleGame(discount: 0), now), isTrue);
+  });
+
+  test('price exclusion follows the effective price when a sale expires', () {
+    final now = DateTime.now().toUtc();
+    final end = now.add(const Duration(minutes: 1));
+    final hiddenOnSale = exampleGame(regular: 6000, discount: 3000, end: end);
+    final hiddenAfterSale = exampleGame(regular: 3000, discount: 999, end: end);
+    expect(matchesPricePolicy(hiddenOnSale, now), isFalse);
+    expect(matchesPricePolicy(hiddenOnSale, end), isTrue);
+    expect(matchesPricePolicy(hiddenAfterSale, now), isTrue);
+    expect(matchesPricePolicy(hiddenAfterSale, end), isFalse);
+  });
+
   test('upcoming uses Korean calendar days and retains official metadata', () {
     final game = GameItem.fromKoreanCatalog({
       'nsuid': '70010000000001',
@@ -55,8 +111,8 @@ void main() {
       List<GameItem> browse(GameBrowse mode, {String query = ''}) =>
           games.where((g) => matchesBrowse(g, mode, query, now)).toList();
       expect(browse(GameBrowse.sales).map((g) => g.id), ['sale']);
-      expect(browse(GameBrowse.all), hasLength(5));
-      expect(browse(GameBrowse.sales, query: '게임'), hasLength(5));
+      expect(browse(GameBrowse.all), hasLength(4));
+      expect(browse(GameBrowse.sales, query: '게임'), hasLength(4));
       final upcoming = browse(GameBrowse.upcoming, query: '게임');
       expect(upcoming.map((g) => g.id), ['soon', 'later']);
       expect(

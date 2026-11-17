@@ -559,7 +559,7 @@ void main() {
     },
   );
   testWidgets(
-    'price exclusion precedes sorting/paging but preserves full search and favorites',
+    'price exclusion applies before sorting/paging to all browse modes, search and saved favorites',
     (tester) async {
       tester.view.physicalSize = const Size(430, 1100);
       tester.view.devicePixelRatio = 1;
@@ -591,6 +591,9 @@ void main() {
           ),
         ];
       final store = MemoryStore();
+      await store.saveFavorite(
+        repository.games.firstWhere((g) => g.discountPrice == 1000),
+      );
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
@@ -620,17 +623,42 @@ void main() {
       expect(find.text('총 23개 · 20개 표시 · 1페이지'), findsOneWidget);
       await tester.enterText(find.byType(TextField), '제외 게임');
       await tester.pumpAndSettle();
-      expect(find.text('총 3개 · 3개 표시 · 1페이지'), findsOneWidget);
-      expect(find.text('제외 게임 1000'), findsOneWidget);
-      expect(find.text('판매가 1,000~4,999원 게임 제외'), findsNothing);
-      await tester.tap(find.byTooltip('관심 게임에 추가').first);
+      expect(find.byType(GameCard), findsNothing);
+      expect(find.text('제외 게임 1000'), findsNothing);
+      expect(find.text('판매가 1,000~4,999원 게임 제외'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), '');
       await tester.pumpAndSettle();
+      await tester.tap(find.text('전체 게임'));
+      await tester.pumpAndSettle();
+      expect(find.text('총 23개 · 20개 표시 · 1페이지'), findsOneWidget);
+      expect(find.text('정가 게임'), findsNothing);
       await tester.tap(find.text('관심 게임'));
       await tester.pumpAndSettle();
-      expect(find.text('제외 게임 1000'), findsOneWidget);
+      expect(find.byType(GameCard), findsNothing);
       expect(store.readFavorites().single.discountPrice, 1000);
       expect(store.games, hasLength(27));
       expect(repository.catalogCalls, 1);
+      // Hidden favorites remain stored and reappear when their price changes.
+      final changed = repository.games.firstWhere(
+        (g) => g.discountPrice == 1000,
+      );
+      repository.games = repository.games
+          .map(
+            (g) => g.id == changed.id
+                ? g.withPrice({
+                    'regular_price': {'raw_value': '10000'},
+                    'discount_price': {'raw_value': '6000'},
+                  }, DateTime.now().toUtc())
+                : g,
+          )
+          .toList();
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(TrackerApp)),
+      );
+      await container.read(gameListProvider.notifier).refresh();
+      await tester.pumpAndSettle();
+      expect(find.text('제외 게임 1000'), findsOneWidget);
+      expect(store.readFavorites().single.discountPrice, 6000);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },
@@ -754,10 +782,15 @@ void main() {
     final repository = FakeRepository()
       ..games = [
         exampleGame(id: '70010000000001', name: '높은 할인', discount: 6000),
-        exampleGame(id: '70010000000002', name: '높은 인기', discount: 3000),
+        exampleGame(id: '70010000000002', name: '높은 인기', discount: 5000),
         exampleGame(id: '70010000000003', name: '정가 순위 게임', discount: null),
+        exampleGame(id: '70010000000004', name: '가격 제외 순위 게임', discount: 3000),
       ]
-      ..popularity = {'70010000000002': 2, '70010000000003': 1};
+      ..popularity = {
+        '70010000000002': 2,
+        '70010000000003': 1,
+        '70010000000004': 3,
+      };
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -781,7 +814,8 @@ void main() {
       '높은 인기',
     );
     expect(find.byType(GameCard), findsOneWidget);
-    expect(find.text('₩3,000'), findsOneWidget);
+    expect(find.text('₩5,000'), findsOneWidget);
+    expect(find.text('가격 제외 순위 게임'), findsNothing);
     expect(find.text('한국 Switch 1 다운로드 2위'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());

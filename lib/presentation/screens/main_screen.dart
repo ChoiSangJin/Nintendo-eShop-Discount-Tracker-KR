@@ -211,7 +211,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                       onPressed: () => showAboutDialog(
                         context: context,
                         applicationName: 'Switch 할인 트래커 KR',
-                        applicationVersion: '1.5.0',
+                        applicationVersion: '1.5.1',
                         applicationIcon: const Icon(
                           Icons.sports_esports_rounded,
                           color: Color(0xffe60012),
@@ -318,18 +318,14 @@ class _MainScreenState extends ConsumerState<MainScreen>
                                         fontSize: 13,
                                       ),
                                     ),
-                                    if (!wishlist &&
-                                        _browse == GameBrowse.sales &&
-                                        _query.trim().isEmpty) ...[
-                                      const SizedBox(height: 6),
-                                      const Text(
-                                        '판매가 1,000~4,999원 게임 제외',
-                                        style: TextStyle(
-                                          color: Color(0xff747680),
-                                          fontSize: 12,
-                                        ),
+                                    const SizedBox(height: 6),
+                                    const Text(
+                                      '판매가 1,000~4,999원 게임 제외',
+                                      style: TextStyle(
+                                        color: Color(0xff747680),
+                                        fontSize: 12,
                                       ),
-                                    ],
+                                    ),
                                     const SizedBox(height: 20),
                                     if (!wishlist) ...[
                                       Wrap(

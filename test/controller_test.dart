@@ -180,6 +180,10 @@ void main() {
           discount: 1500,
         ).withPopularityRank(4, source: 'kr:2026:1st'),
         exampleGame(
+          id: 'switch1',
+          discount: 5000,
+        ).withPopularityRank(5, source: 'kr:2026:1st'),
+        exampleGame(
           id: 'switch2',
           hardware: 'Nintendo Switch 2',
         ).withPopularityRank(1, source: 'kr:2026:1st'),
@@ -201,7 +205,7 @@ void main() {
         sort: GameSort.popular,
         now: now,
       );
-      expect(found.map((g) => g.id), ['low-price', 'switch2']);
+      expect(found.map((g) => g.id), ['switch1', 'switch2']);
     },
   );
 
